@@ -1,0 +1,22 @@
+# LLM и RAG
+langchain-core
+langchain-openai
+langchain-chroma
+langchain-huggingface
+langchain-text-splitters
+chromadb
+sentence-transformers
+
+# Индексация (OCR нужен только для сканов)
+pymupdf
+easyocr
+pillow
+numpy
+
+# Сервис
+fastapi
+uvicorn
+
+# Подключаются позже (для тестов не нужны)
+redis
+kafka-python
