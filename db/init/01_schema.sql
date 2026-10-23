@@ -16,12 +16,32 @@ CREATE TABLE users (
     role_id     uuid NOT NULL REFERENCES role(id) ON DELETE RESTRICT,
     director_id uuid REFERENCES users(id) ON DELETE RESTRICT,  -- NULL у руководителей
     max_id      bigint NOT NULL UNIQUE,
+    email       varchar,
+    phone       varchar,
     created_at  timestamp NOT NULL DEFAULT now(),
     updated_at  timestamp NOT NULL DEFAULT now()
 );
 
 CREATE INDEX users_director_id_idx ON users(director_id);
 CREATE INDEX users_role_id_idx ON users(role_id);
+
+CREATE TABLE invites (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash      varchar NOT NULL UNIQUE,  -- sha256(token); сам токен только в QR/ссылке
+    name            varchar NOT NULL,
+    surname         varchar NOT NULL,
+    tag_id          uuid REFERENCES tag(id) ON DELETE SET NULL,
+    director_id     uuid REFERENCES users(id) ON DELETE SET NULL,
+    email           varchar NOT NULL,
+    phone           varchar NOT NULL,         -- только цифры, 7XXXXXXXXXX
+    created_by      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      timestamp NOT NULL DEFAULT now(),
+    expires_at      timestamp NOT NULL,
+    used_at         timestamp,
+    used_by_max_id  bigint
+);
+
+CREATE INDEX invites_phone_idx ON invites(phone);
 
 CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
 BEGIN
