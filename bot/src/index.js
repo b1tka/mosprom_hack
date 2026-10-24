@@ -51,15 +51,25 @@ bot.on('message_created', async (ctx) => {
 
   // Любое сообщение нового сотрудника — вопрос к RAG ML-сервиса; настроение ML считает сам, в фоне
   if (user.role !== 'employee') return ctx.reply('Откройте /menu, чтобы выбрать действие.');
-  let result = null;
-  try {
-    result = await ask({ userId: user.id, question: text });
-  } catch (err) {
-    console.error('ml api failed', err);
-  }
-  // 200 — ответ + кнопка «Связаться с HR», 400 — ответа в базе нет, тикет HR создаётся сам; null — ML недоступен
-  return replyToQuestion(ctx, user, text, result);
+  // LLM отвечает до минуты, а polling библиотеки ждёт все обработчики пачки — поэтому ответ готовим в фоне
+  answerInBackground(ctx, user, text);
 });
+
+async function answerInBackground(ctx, user, question) {
+  try {
+    ctx.sendAction('typing_on').catch(() => {});
+    let result = null;
+    try {
+      result = await ask({ userId: user.id, question });
+    } catch (err) {
+      console.error('ml api failed', err);
+    }
+    // 200 — ответ + кнопка «Связаться с HR», 400 — ответа в базе нет, тикет HR создаётся сам; null — ML недоступен
+    await replyToQuestion(ctx, user, question, result);
+  } catch (err) {
+    console.error('answer failed', err);
+  }
+}
 
 async function main() {
   await pool.query('SELECT 1');
