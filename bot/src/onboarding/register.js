@@ -108,7 +108,7 @@ async function showEmployees(ctx, hr, page, notification) {
   if ((page + 1) * PAGE < all.length) nav.push(cb('Вперёд →', `ob:emps:${page + 1}`));
   if (nav.length) rows.push(nav);
   rows.push([cb('← Меню', 'menu:main')]);
-  return show(ctx, all.length ? `Мои сотрудники (${all.length}):` : 'Сотрудников пока нет.', kb(rows), notification);
+  return show(ctx, all.length ? `Мои сотрудники 👥 (${all.length}):` : 'Сотрудников пока нет 🙂', kb(rows), notification);
 }
 
 async function showEmployeeCard(ctx, emp, notification) {
@@ -165,19 +165,19 @@ export function registerOnboarding(bot) {
   // ----- быстрые действия из кнопок под сообщениями сценария
   bot.action('oa:contact_hr', async (ctx) => {
     const user = await findUserByMaxId(ctx.user.user_id);
-    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Доступно сотрудникам.' });
+    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Это доступно сотрудникам 🙂' });
     await ctx.answerOnCallback({ notification: 'Связываю с HR' });
     return openContactTicket(ctx, user);
   });
   bot.action('oa:report_problem', async (ctx) => {
     const user = await findUserByMaxId(ctx.user.user_id);
-    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Доступно сотрудникам.' });
-    await ctx.answerOnCallback({ notification: 'Опишите проблему' });
+    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Это доступно сотрудникам 🙂' });
+    await ctx.answerOnCallback({ notification: 'Расскажи, что случилось' });
     return startReport(ctx.user.user_id);
   });
   bot.action('oa:food', async (ctx) => {
     const ob = await findByUser((await findUserByMaxId(ctx.user.user_id))?.id);
-    if (!ob) return ctx.answerOnCallback({ notification: 'Недоступно.' });
+    if (!ob) return ctx.answerOnCallback({ notification: 'Пока недоступно 🙂' });
     await ctx.answerOnCallback({ notification: 'Где пообедать' });
     return engine.sendBlock(ob, 'food');
   });
@@ -185,12 +185,12 @@ export function registerOnboarding(bot) {
   // ----- команды
   bot.command(/^hr$/i, async (ctx) => {
     const user = await findUserByMaxId(ctx.user.user_id);
-    if (user?.role !== 'employee') return ctx.reply('Команда для сотрудников. Откройте /menu.');
+    if (user?.role !== 'employee') return ctx.reply('Эта команда для сотрудников 🙂 Загляните в /menu.');
     return openContactTicket(ctx, user);
   });
   bot.command(/^food$/i, async (ctx) => {
     const user = await findUserByMaxId(ctx.user.user_id);
-    if (user?.role !== 'employee') return ctx.reply('Команда для сотрудников.');
+    if (user?.role !== 'employee') return ctx.reply('Эта команда для сотрудников 🙂');
     const ob = await findByUser(user.id);
     return engine.sendBlock(ob ?? { userId: user.id, maxId: String(ctx.user.user_id), name: user.name, tag: user.tag }, 'food');
   });
@@ -205,22 +205,22 @@ export function registerOnboarding(bot) {
 
     if (state.step === 'report_problem') {
       const user = await findUserByMaxId(maxId);
-      if (!text?.trim()) return ctx.reply('Опишите проблему текстом.');
+      if (!text?.trim()) return ctx.reply('Опиши проблему текстом, пожалуйста 🙂');
       await setState(maxId, { step: 'idle', data: {} });
       return openTicket(ctx, user, { question: text.trim(), answer: null, source: 'report' });
     }
     if (state.step === 'ob_date') {
       const hr = await findUserByMaxId(maxId);
       const emp = isHr(hr) ? await allowedEmployee(hr, state.data.userId) : null;
-      if (!emp) { await setState(maxId, { step: 'idle', data: {} }); return ctx.reply('Недостаточно прав.'); }
+      if (!emp) { await setState(maxId, { step: 'idle', data: {} }); return ctx.reply('Эта функция доступна только HR 🙂'); }
       const iso = parseDate(text);
-      if (!iso) return ctx.reply('Не понял дату. Формат: ДД.ММ.ГГГГ, например 02.11.2026. Отмена: /cancel.');
+      if (!iso) return ctx.reply('Не понял дату 🤔 Формат: ДД.ММ.ГГГГ, например 02.11.2026. Отмена: /cancel.');
       await setState(maxId, { step: 'idle', data: {} });
       const applied = await engine.setStartDate(emp.id, iso);
       if (applied) await setUserStartDate(emp.id, applied);
       return ctx.reply(applied
-        ? `Дата выхода: ${fmtDate(applied)}${applied !== iso ? ' (выходной сдвинут на понедельник)' : ''}. Расписание пересчитано.`
-        : 'У сотрудника не запущен сценарий.');
+        ? `✅ Дата выхода: ${fmtDate(applied)}${applied !== iso ? ' (выходной сдвинул на понедельник)' : ''}. Расписание пересчитал.`
+        : 'У этого сотрудника сценарий пока не запущен 🙂');
     }
     if (state.step !== 'idle' && state.step !== 'start') return next();   // чужой шаг диалога: решают другие обработчики
 
@@ -233,30 +233,30 @@ export function registerOnboarding(bot) {
   // ----- меню HR: «Мои сотрудники»
   const hrAction = (re, handler) => bot.action(re, async (ctx) => {
     const hr = await findUserByMaxId(ctx.user.user_id);
-    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     return handler(ctx, hr);
   });
   hrAction(/^ob:emps:(\d+)$/, (ctx, hr) => showEmployees(ctx, hr, Number(ctx.match[1]), 'Сотрудники'));
   hrAction(/^ob:emp:([0-9a-f-]{36})$/, async (ctx, hr) => {
     const emp = await allowedEmployee(hr, ctx.match[1]);
-    if (!emp) return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    if (!emp) return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
     return showEmployeeCard(ctx, emp, `${emp.surname}`);
   });
   hrAction(/^ob:(pause|resume):([0-9a-f-]{36})$/, async (ctx, hr) => {
     const emp = await allowedEmployee(hr, ctx.match[2]);
-    if (!emp) return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    if (!emp) return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
     await engine.setStatus(emp.id, ctx.match[1] === 'pause' ? 'paused' : 'active');
     return showEmployeeCard(ctx, emp, ctx.match[1] === 'pause' ? 'На паузе' : 'Продолжено');
   });
   hrAction(/^ob:date:([0-9a-f-]{36})$/, async (ctx, hr) => {
     const emp = await allowedEmployee(hr, ctx.match[1]);
-    if (!emp) return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    if (!emp) return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
     await setState(ctx.user.user_id, { step: 'ob_date', data: { userId: emp.id } });
-    return show(ctx, `Введите новую дату выхода сотрудника ${emp.surname} ${emp.name} в формате ДД.ММ.ГГГГ (например, 02.11.2026). Отмена: /cancel.`, null, 'Дата выхода');
+    return show(ctx, `Напишите новую дату выхода сотрудника ${emp.surname} ${emp.name} в формате ДД.ММ.ГГГГ (например, 02.11.2026) 📅 Отмена: /cancel.`, null, 'Дата выхода');
   });
   hrAction(/^ob:launch:([0-9a-f-]{36})$/, async (ctx, hr) => {
     const emp = await allowedEmployee(hr, ctx.match[1]);
-    if (!emp) return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    if (!emp) return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
     await startOnboardingFor(emp.id);
     return showEmployeeCard(ctx, emp, 'Сценарий запущен');
   });

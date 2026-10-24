@@ -18,20 +18,20 @@ const makeCode = () => Array.from({ length: 8 }, () => ALPHABET[crypto.randomInt
 export function registerAdmin(bot) {
   bot.command('admin', async (ctx) => {
     const { access, url } = config.admin;
-    if (access === 'off') return ctx.reply('Админка отключена.');
+    if (access === 'off') return ctx.reply('Админка сейчас отключена 🙂');
     const maxId = ctx.user.user_id;
     const user = await findUserByMaxId(maxId);
-    if (access === 'hr' && !isHr(user)) return ctx.reply('Недостаточно прав.');
-    if (access !== 'hr' && access !== 'anyone') return ctx.reply('Админка настроена неверно (ADMIN_ACCESS).');
+    if (access === 'hr' && !isHr(user)) return ctx.reply('Эта функция доступна только HR 🙂');
+    if (access !== 'hr' && access !== 'anyone') return ctx.reply('Админка настроена неверно 😕 Загляните в настройки (ADMIN_ACCESS).');
 
     const n = await redis.incr(`admin:codes:${maxId}`);
     if (n === 1) await redis.expire(`admin:codes:${maxId}`, 60);
-    if (n > MAX_CODES_PER_MINUTE) return ctx.reply('Слишком много запросов. Попробуйте через минуту.');
+    if (n > MAX_CODES_PER_MINUTE) return ctx.reply('Слишком много запросов 🙂 Попробуйте через минуту.');
 
     const code = makeCode();
     await redis.set(`admin:code:${code}`, JSON.stringify({ maxId: String(maxId), name: user ? `${user.name} ${user.surname}` : null, role: user?.role ?? null }), 'EX', CODE_TTL_SECONDS);
     return ctx.reply(
-      `Код входа в админку: ${code}\nДействует 5 минут, один раз.\n\nАдрес (через SSH-туннель): ${url}\nСсылка со входом: ${url}/auth?code=${code}`,
+      `🔑 Код входа в админку: ${code}\nОн действует 5 минут и срабатывает один раз.\n\nАдрес (через SSH-туннель): ${url}\nСсылка со входом: ${url}/auth?code=${code}`,
     );
   });
 }

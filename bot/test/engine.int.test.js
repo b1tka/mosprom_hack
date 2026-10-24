@@ -270,7 +270,7 @@ t('рассказ о себе: текст и фото уходят HR, шаг и
   const r = await h.engine.onText({ maxId: ob.maxId, text: 'Я инженер, 5 лет в отрасли', attachments: [{ type: 'image', payload: { token: 'ph' } }] });
   await r.resume();
   assert.ok(h.calls.notify.some((x) => /рассказал о себе/.test(x) && /инженер/.test(x)));
-  assert.ok(h.sent.some((m) => /передал твой рассказ/.test(m.text)));
+  assert.ok(h.sent.some((m) => /Передал твой рассказ/.test(m.text)));
   assert.equal((await store.findByUser(h.user.id)).steps.find((s) => s.id === 'day2_10').state, 'sent');
   await cleanup();
 });

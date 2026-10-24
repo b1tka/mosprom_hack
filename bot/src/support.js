@@ -101,7 +101,7 @@ function messageLine(m, viewer) {
   let who;
   if (m.from === 'bot') who = 'Бот';
   else if (m.from === 'hr') who = viewer.side === 'hr' && m.authorId === viewer.userId ? 'Вы' : 'HR';
-  else who = viewer.side === 'employee' ? 'Вы' : viewer.employeeName;
+  else who = viewer.side === 'employee' ? 'Ты' : viewer.employeeName;
   const parts = [m.text ? truncate(m.text, MAX_MESSAGE_PREVIEW) : '', ...(m.attachments ?? []).map(describeAttachment)].filter(Boolean);
   return `${fmtTime(m.at)} ${who}: ${parts.join(' ')}`;
 }
@@ -160,7 +160,7 @@ export async function openTicket(ctx, user, { question, answer, source }) {
   const maxId = ctx.user.user_id;
   const contacts = await findEmployeeContacts(user.id);
   if (!contacts?.hr) {
-    return ctx.reply('За вами не закреплён HR-специалист, поэтому создать обращение не получится. Обратитесь в отдел кадров.');
+    return ctx.reply('Пока за тобой не закреплён HR-специалист, поэтому создать обращение не получится 😕 Напиши, пожалуйста, в отдел кадров напрямую.');
   }
   const now = new Date();
   const messages = [{ at: now, from: 'employee', authorId: user.id, text: question, attachments: [] }];
@@ -176,8 +176,8 @@ export async function openTicket(ctx, user, { question, answer, source }) {
   });
   await setState(maxId, { step: 'ticket_chat', data: { ticketId: idOf(ticket) } });
   await ctx.reply(
-    `Создано обращение №${ticket.number}. Вы в чате с HR (${shortName(contacts.hr)}): всё, что вы напишете, получит HR. `
-      + 'Чтобы снова задавать вопросы боту, нажмите кнопку ниже или напишите /bot.',
+    `Создал обращение №${ticket.number} 📝 Ты в чате с HR (${shortName(contacts.hr)}): всё, что напишешь, получит HR. `
+      + 'Чтобы снова задавать вопросы мне, нажми кнопку ниже или напиши /bot.',
     { attachments: [kb([[btn('Вернуться к боту', 'tk:exit')]])] },
   );
   try {
@@ -204,7 +204,7 @@ export async function replyToQuestion(ctx, user, question, result) {
     const rows = sc.unknown_question.buttons.map((b) => [btn(b.label, b.action === 'report_problem' ? `tk:ask:${qid}` : `oa:${b.action}`)]);
     return sendMessage(ctx.api, sc, ctx.user.user_id, { text: renderText(sc.unknown_question.text, user), img: sc.unknown_question.img, rows });
   }
-  const text = result ? result.answer : 'Сервис ответов временно недоступен, попробуйте позже.';
+  const text = result ? result.answer : 'Ой, сейчас не получается ответить 😕 Сервис временно недоступен. Попробуй чуть позже или нажми кнопку, и я передам вопрос HR.';
   const qid = await rememberQa(ctx.user.user_id, question, result?.answer ?? null);
   return ctx.reply(text, { attachments: [kb([[btn('Связаться с HR', `tk:ask:${qid}`)]])] });
 }
@@ -216,15 +216,15 @@ async function employeeMessage(ctx, user, state) {
   const ticket = await getTicket(state.data.ticketId);
   if (!ticket || ticket.employee.id !== user.id) {
     await setState(maxId, idle);
-    return ctx.reply('Обращение не найдено. Вы снова общаетесь с ботом.');
+    return ctx.reply('Не нашёл это обращение 🤔 Мы снова общаемся, задавай вопросы!');
   }
   const text = ctx.message?.body?.text ?? '';
   const attachments = extractAttachments(ctx);
-  if (!text && !attachments.length) return ctx.reply('Можно отправить текст, фото или файл.');
+  if (!text && !attachments.length) return ctx.reply('Можно отправить текст, фото или файл 🙂');
   const updated = await addMessage(ticket._id, { at: new Date(), from: 'employee', authorId: user.id, text, attachments });
   if (!updated) {
     await setState(maxId, idle);
-    return ctx.reply(`Обращение №${ticket.number} уже закрыто, сообщение не отправлено. Вы снова общаетесь с ботом.`);
+    return ctx.reply(`Обращение №${ticket.number} уже закрыто, поэтому сообщение не отправил 😕 Мы снова общаемся, задавай вопросы!`);
   }
 
   // HR сейчас в этом тикете — просто реплика; иначе уведомление с кнопкой
@@ -253,17 +253,17 @@ async function hrMessage(ctx, hr, state) {
   const ticket = await getTicket(state.data.ticketId);
   if (!ticket || !canSee(hr, ticket)) {
     await setState(maxId, idle);
-    return ctx.reply('Обращение не найдено. Откройте /menu.');
+    return ctx.reply('Не нашёл это обращение 🤔 Откройте /menu.');
   }
   const text = ctx.message?.body?.text ?? '';
   const attachments = extractAttachments(ctx);
-  if (!text && !attachments.length) return ctx.reply('Можно отправить текст, фото или файл.');
+  if (!text && !attachments.length) return ctx.reply('Можно отправить текст, фото или файл 🙂');
   const res = await relayHrMessage(ctx.api, hr.id, ticket, text, attachments);
   if (res.status === 'closed') {
     await setState(maxId, idle);
-    return ctx.reply(`Обращение №${ticket.number} закрыто, сообщение не отправлено. Переоткрыть можно из архива.`);
+    return ctx.reply(`Обращение №${ticket.number} закрыто, поэтому сообщение не отправил 😕 Его можно переоткрыть из архива.`);
   }
-  if (res.status === 'delivery_failed') return ctx.reply(`Не удалось доставить сообщение сотруднику (№${ticket.number}). Попробуйте позже.`);
+  if (res.status === 'delivery_failed') return ctx.reply(`Не получилось доставить сообщение сотруднику (№${ticket.number}) 😕 Попробуйте чуть позже.`);
   return ctx.reply(`→ №${ticket.number}, ${shortName(ticket.employee)}`);
 }
 
@@ -300,7 +300,7 @@ export async function closeTicketAsHr(api, ticket) {
   try {
     await api.sendMessageToUser(
       Number(ticket.employee.maxId),
-      `✅ HR закрыл обращение №${ticket.number} «${closed.title}». Если вопрос остался — задайте его боту, `
+      `✅ HR закрыл(а) обращение №${ticket.number} «${closed.title}». Если вопрос остался, просто задай его мне: `
         + 'под ответом будет кнопка «Связаться с HR».',
     );
   } catch (err) {
@@ -316,7 +316,7 @@ export async function reopenTicketAsHr(api, ticket) {
   try {
     await api.sendMessageToUser(
       Number(ticket.employee.maxId),
-      `HR снова открыл обращение №${ticket.number} «${reopened.title}».`,
+      `HR снова открыл(а) обращение №${ticket.number} «${reopened.title}» 🙂`,
       { attachments: [kb([[btn('Ответить', `tk:chat:${idOf(ticket)}`)]])] },
     );
   } catch (err) {
@@ -362,7 +362,7 @@ async function showHrList(ctx, hr, page, notification) {
   });
   rows.push(...pageNav('tk:list', page, total));
   rows.push([btn('Архив', 'tk:arch:0'), btn('← Меню', 'menu:main')]);
-  const title = total ? `Обращения (открытых: ${total}${pagesSuffix(page, total)}):` : 'Открытых обращений нет.';
+  const title = total ? `Открытые обращения: ${total}${pagesSuffix(page, total)} 📋` : 'Открытых обращений нет, всё спокойно 🙂';
   return show(ctx, title, kb(rows), notification);
 }
 
@@ -371,7 +371,7 @@ async function showHrArchive(ctx, hr, page, notification) {
   const rows = items.map((t) => [btn(truncate(`№${t.number} · ${shortName(t.employee)} · ${t.title}`, MAX_LABEL_LEN), `tk:open:${idOf(t)}`)]);
   rows.push(...pageNav('tk:arch', page, total));
   rows.push([btn('← К обращениям', 'tk:list:0')]);
-  const title = total ? `Архив обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пуст.';
+  const title = total ? `Архив обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пока пуст 🙂';
   return show(ctx, title, kb(rows), notification);
 }
 
@@ -388,8 +388,8 @@ async function showEmployeeList(ctx, user, status, page, notification) {
     ? [btn('Архив', 'my:list:closed:0'), btn('← Меню', 'menu:main')]
     : [btn('← Открытые', 'my:list:open:0')]);
   let title;
-  if (status === 'open') title = total ? `Ваши открытые обращения (${total}${pagesSuffix(page, total)}):` : 'Открытых обращений нет.';
-  else title = total ? `Архив ваших обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пуст.';
+  if (status === 'open') title = total ? `Твои открытые обращения (${total}${pagesSuffix(page, total)}):` : 'Открытых обращений нет 🙂';
+  else title = total ? `Твой архив обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пока пуст 🙂';
   return show(ctx, title, kb(rows), notification);
 }
 
@@ -406,7 +406,7 @@ async function enterChat(ctx, ticket) {
   await setState(ctx.user.user_id, { step: 'ticket_chat', data: { ticketId: idOf(ticket) } });
   await markRead(ticket._id, 'employee');
   return ctx.reply(
-    `Вы в чате по обращению №${ticket.number} «${ticket.title}». Пишите — получит HR. Вернуться к боту: кнопка ниже или /bot.`,
+    `Ты в чате по обращению №${ticket.number} «${ticket.title}» 💬 Пиши, всё получит HR. Вернуться ко мне: кнопка ниже или /bot.`,
     { attachments: [kb([[btn('Вернуться к боту', 'tk:exit')]])] },
   );
 }
@@ -434,7 +434,7 @@ export async function openContactTicket(ctx, user, { note } = {}) {
     try {
       await ctx.api.sendMessageToUser(
         Number(contacts.hr.maxId),
-        `🆕 ${shortName(user)} хочет связаться с HR (обращение №${ticket.number}).`,
+        `🆕 ${shortName(user)} хочет связаться с HR, обращение №${ticket.number} 💬`,
         { attachments: [kb([[btn('Открыть', `tk:new:${idOf(ticket)}`)]])] },
       );
     } catch (err) {
@@ -445,7 +445,7 @@ export async function openContactTicket(ctx, user, { note } = {}) {
   return ticket;
 }
 
-const BACK_TO_BOT = 'Вы снова общаетесь с ботом: задавайте вопросы. Обращения к HR — в /menu.';
+const BACK_TO_BOT = 'Мы снова общаемся 🙂 Задавай вопросы! Обращения к HR найдёшь в /menu.';
 
 // ---------- подключение к боту ----------
 
@@ -455,7 +455,7 @@ export function registerSupport(bot) {
     const { step } = await getState(maxId);
     if (step === 'ticket_reply') {
       await setState(maxId, idle);
-      return ctx.reply('Вы вышли из обращения. Обращения — в /menu.');
+      return ctx.reply('Вышел из обращения 🙂 Все обращения найдёте в /menu.');
     }
     await setState(maxId, idle);
     return ctx.reply(BACK_TO_BOT);
@@ -479,13 +479,13 @@ export function registerSupport(bot) {
   // кнопки сотрудника: проверяем роль и что тикет его
   const employeeAction = (re, handler) => bot.action(re, async (ctx) => {
     const user = await findUserByMaxId(ctx.user.user_id);
-    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Действие недоступно.' });
+    if (user?.role !== 'employee') return ctx.answerOnCallback({ notification: 'Это действие недоступно 🙂' });
     return handler(ctx, user);
   });
   const ownTicket = async (ctx, user, id) => {
     const ticket = await getTicket(id);
     if (!ticket || ticket.employee.id !== user.id) {
-      await ctx.answerOnCallback({ notification: 'Обращение не найдено.' });
+      await ctx.answerOnCallback({ notification: 'Не нашёл это обращение 🤔' });
       return null;
     }
     return ticket;
@@ -494,7 +494,7 @@ export function registerSupport(bot) {
   employeeAction(/^tk:ask:([0-9a-f]+)$/, async (ctx, user) => {
     // GETDEL: повторное нажатие той же кнопки не создаст второй тикет
     const raw = await redis.getdel(`lastqa:${ctx.user.user_id}:${ctx.match[1]}`);
-    if (!raw) return ctx.answerOnCallback({ notification: 'Кнопка устарела. Задайте вопрос ещё раз.' });
+    if (!raw) return ctx.answerOnCallback({ notification: 'Эта кнопка устарела 🙂 Задай вопрос ещё раз.' });
     await ctx.answerOnCallback({ notification: 'Создаю обращение…' });
     const { question, answer } = JSON.parse(raw);
     return openTicket(ctx, user, { question, answer, source: 'button' });
@@ -502,13 +502,13 @@ export function registerSupport(bot) {
 
   employeeAction('tk:exit', async (ctx) => {
     await setState(ctx.user.user_id, idle);
-    return show(ctx, BACK_TO_BOT, null, 'Вы снова с ботом');
+    return show(ctx, BACK_TO_BOT, null, 'Снова на связи 🙂');
   });
 
   employeeAction(/^tk:chat:([0-9a-f]{24})$/, async (ctx, user) => {
     const ticket = await ownTicket(ctx, user, ctx.match[1]);
     if (!ticket) return null;
-    if (ticket.status !== 'open') return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
+    if (ticket.status !== 'open') return ctx.answerOnCallback({ notification: 'Это обращение уже закрыто 🙂' });
     await ctx.answerOnCallback({ notification: `Чат по №${ticket.number}` });
     return enterChat(ctx, ticket);
   });
@@ -517,17 +517,17 @@ export function registerSupport(bot) {
     const ticket = await ownTicket(ctx, user, ctx.match[1]);
     if (!ticket) return null;
     const closed = await closeTicket(ticket._id, 'employee');
-    if (!closed) return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
+    if (!closed) return ctx.answerOnCallback({ notification: 'Это обращение уже закрыто 🙂' });
     publishDialog(closed);
     const maxId = ctx.user.user_id;
     const state = await getState(maxId);
     if (state.step === 'ticket_chat' && state.data.ticketId === idOf(ticket)) await setState(maxId, idle);
     await ctx.answerOnCallback({ notification: 'Закрыто' });
-    await ctx.reply(`Обращение №${ticket.number} закрыто. Спасибо! Вы снова общаетесь с ботом.`);
+    await ctx.reply(`Обращение №${ticket.number} закрыто. Спасибо! 🙌 Мы снова общаемся, задавай вопросы.`);
     try {
       await ctx.api.sendMessageToUser(
         Number(ticket.hrMaxId),
-        `✅ ${shortName(ticket.employee)} закрыл(а) обращение №${ticket.number} «${closed.title}»: вопрос решён.`,
+        `✅ ${shortName(ticket.employee)} закрыл(а) обращение №${ticket.number} «${closed.title}»: вопрос решён 🎉`,
       );
     } catch (err) {
       console.error('hr close notification failed', ticket.number, err);
@@ -548,13 +548,13 @@ export function registerSupport(bot) {
   // кнопки HR: права и видимость тикета проверяются на каждом нажатии
   const hrAction = (re, handler) => bot.action(re, async (ctx) => {
     const hr = await findUserByMaxId(ctx.user.user_id);
-    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     return handler(ctx, hr);
   });
   const visibleTicket = async (ctx, hr, id) => {
     const ticket = await getTicket(id);
     if (!ticket || !canSee(hr, ticket)) {
-      await ctx.answerOnCallback({ notification: 'Обращение не найдено.' });
+      await ctx.answerOnCallback({ notification: 'Не нашёл это обращение 🤔' });
       return null;
     }
     return ticket;
@@ -579,7 +579,7 @@ export function registerSupport(bot) {
 
   hrAction(/^tk:next:([0-9a-f]{24})$/, async (ctx, hr) => {
     const next = await nextUnreadForHr(hrScope(hr), ctx.match[1]);
-    if (!next) return ctx.answerOnCallback({ notification: 'Больше непрочитанных нет.' });
+    if (!next) return ctx.answerOnCallback({ notification: 'Непрочитанных больше нет 🎉' });
     return showHrCard(ctx, hr, await getTicket(next._id), `№${next.number}`);
   });
 
@@ -587,7 +587,7 @@ export function registerSupport(bot) {
     const ticket = await visibleTicket(ctx, hr, ctx.match[1]);
     if (!ticket) return null;
     const closed = await closeTicketAsHr(ctx.api, ticket);
-    if (!closed) return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
+    if (!closed) return ctx.answerOnCallback({ notification: 'Это обращение уже закрыто 🙂' });
     await setState(ctx.user.user_id, idle);
     return show(
       ctx,
@@ -601,14 +601,14 @@ export function registerSupport(bot) {
     const ticket = await visibleTicket(ctx, hr, ctx.match[1]);
     if (!ticket) return null;
     const reopened = await reopenTicketAsHr(ctx.api, ticket);
-    if (!reopened) return ctx.answerOnCallback({ notification: 'Обращение уже открыто.' });
+    if (!reopened) return ctx.answerOnCallback({ notification: 'Оно уже открыто 🙂' });
     return showHrCard(ctx, hr, reopened, 'Переоткрыто');
   });
 
   // HR начинает диалог с сотрудником (кнопка «Написать сотруднику» в уведомлениях опросов)
   hrAction(/^tk:contact:([0-9a-f-]{36})$/, async (ctx, hr) => {
     const emp = await findUserById(ctx.match[1]);
-    if (!emp || emp.role !== 'employee') return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    if (!emp || emp.role !== 'employee') return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
     let ticket = await findOpenForEmployee(emp.id);
     if (!ticket) {
       const contacts = await findEmployeeContacts(emp.id);

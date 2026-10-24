@@ -27,7 +27,7 @@ const stats = mdb.collection('stats');
 
 function alertText(alert, emp) {
   const who = [`${emp.name} ${emp.surname}`, emp.tag, emp.director ? `рук. ${emp.director}` : null].filter(Boolean).join(', ');
-  const lines = [`🚩 Срочно: ${who}`];
+  const lines = [`🚩 Нужно ваше внимание: ${who}`];
   lines.push(`Тема: ${CATEGORY_TITLES[alert.reason] ?? alert.reason}`);
   if (alert.explanation) lines.push(`Что случилось: ${alert.explanation}`);
   if (alert.source === 'ticket' && alert.ticket_number) lines.push(`Источник: обращение №${alert.ticket_number}`);
@@ -74,10 +74,10 @@ const canReset = (hr, emp) => hr.role === 'hr_head' || !emp.hrId || emp.hrId ===
 export function registerAlerts(bot) {
   bot.action(/^rf:reset:([0-9a-f-]{36})$/, async (ctx) => {
     const hr = await findUserByMaxId(ctx.user.user_id);
-    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+    if (!isHr(hr)) return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     const emp = await findEmployeeForAlert(ctx.match[1]);
-    if (!emp) return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
-    if (!canReset(hr, emp)) return ctx.answerOnCallback({ notification: 'Это не ваш сотрудник.' });
+    if (!emp) return ctx.answerOnCallback({ notification: 'Не нашёл сотрудника 🤔' });
+    if (!canReset(hr, emp)) return ctx.answerOnCallback({ notification: 'Этот сотрудник закреплён за другим HR 🙂' });
 
     const now = new Date();
     await stats.updateOne(
@@ -86,7 +86,7 @@ export function registerAlerts(bot) {
     );
     await redis.del(`alert:${emp.id}`);   // следующая срочная оценка снова уведомит сразу
     const original = ctx.message?.body?.text;
-    const done = `✅ Флаг по ${emp.name} ${emp.surname} снят (${hr.name} ${hr.surname[0]}., ${fmtTime(now)}).`;
+    const done = `✅ Готово, флаг по ${emp.name} ${emp.surname} снят (${hr.name} ${hr.surname[0]}., ${fmtTime(now)}). Спасибо, что позаботились!`;
     return show(ctx, original ? `${original}\n\n${done}` : done, null, 'Флаг снят');
   });
 }

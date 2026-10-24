@@ -80,7 +80,7 @@ export function createEngine(deps) {
       await sendMessage(api, scenario, ob.maxId, { text: answer });
     } else {
       await sendMessage(api, scenario, ob.maxId, { text: render(ins.fallback, ob) });
-      await notifyHr(ob.userId, `ℹ️ Сотруднику нужна информация, ответа в базе знаний нет: «${ins.query}»`, { chatButton: true });
+      await notifyHr(ob.userId, `ℹ️ Сотруднику интересно: «${ins.query}», но в базе знаний пока нет ответа. Возможно, стоит пополнить базу или написать ему напрямую 🙂`, { chatButton: true });
     }
   }
 
@@ -287,7 +287,7 @@ export function createEngine(deps) {
     }
   }
 
-  const negativeNote = (ob, ins, answer) => notifyHr(ob.userId, `⚠️ Негативный ответ в опросе.\nВопрос: ${truncate(render(ins.text, ob), 300)}\nОтвет: ${truncate(String(answer), 300)}`);
+  const negativeNote = (ob, ins, answer) => notifyHr(ob.userId, `⚠️ Негативный ответ в опросе, обратите внимание 🙏\nВопрос: ${truncate(render(ins.text, ob), 300)}\nОтвет: ${truncate(String(answer), 300)}`);
 
   const resumeAt = (ob, w, pc) => async () => {
     await run(ob._id, w.stepId, pc);
@@ -331,17 +331,17 @@ export function createEngine(deps) {
    */
   async function onCallback({ maxId, waitId, token }) {
     const ob = await onb().findOne({ maxId: String(maxId), 'waits.id': waitId });
-    if (!ob) return { ok: false, toast: 'Этот вопрос уже закрыт.' };
+    if (!ob) return { ok: false, toast: 'Этот вопрос уже закрыт 🙂' };
     const w = ob.waits.find((x) => x.id === waitId);
     const ins = stepDef(w.stepId)?.program[w.pc];
-    if (!ins) return { ok: false, toast: 'Вопрос устарел.' };
+    if (!ins) return { ok: false, toast: 'Этот вопрос уже неактуален 🙂' };
     // ожидание текста (причина, «свой вариант», рассказ) принимает только текст; у узла text допустимы «пропустить» и действия
-    if (w.kind === 'text' && !(w.purpose === undefined && (token === 's' || token.startsWith('@')))) return { ok: false, toast: 'Ответь, пожалуйста, текстом.' };
+    if (w.kind === 'text' && !(w.purpose === undefined && (token === 's' || token.startsWith('@')))) return { ok: false, toast: 'Ответь, пожалуйста, текстом 🙂' };
 
     // переключатель в множественном выборе: ожидание не снимаем
     if (ins.op === 'multi' && token.startsWith('t')) {
       const key = token.slice(1);
-      if (!ins.options.some((o) => o.key === key)) return { ok: false, toast: 'Неизвестный вариант.' };
+      if (!ins.options.some((o) => o.key === key)) return { ok: false, toast: 'Не нашёл такой вариант 🤔' };
       const selected = w.selected.includes(key) ? w.selected.filter((k) => k !== key) : [...w.selected, key];
       await onb().updateOne({ _id: ob._id, 'waits.id': waitId }, { $set: { 'waits.$.selected': selected } });
       return { ok: true, toast: 'Выбрано', edit: { text: w.text, img: w.img, rows: keyboardFor({ ...w, selected }, ins) } };
@@ -349,7 +349,7 @@ export function createEngine(deps) {
 
     // снимаем ожидание атомарно: повторное нажатие получит «уже закрыт»
     const taken = await onb().findOneAndUpdate({ _id: ob._id, 'waits.id': waitId }, { $pull: { waits: { id: waitId } } }, { returnDocument: 'before' });
-    if (!taken) return { ok: false, toast: 'Этот вопрос уже закрыт.' };
+    if (!taken) return { ok: false, toast: 'Этот вопрос уже закрыт 🙂' };
 
     if (token.startsWith('@') && ins.op === 'text') {
       const action = token.slice(1);
@@ -365,12 +365,12 @@ export function createEngine(deps) {
     if (ins.op === 'ask' && token === 'o' && ins.other) {
       return {
         ok: true, toast: ins.other, edit: { text: `${w.text}\n\n✓ ${ins.other}`, img: w.img },
-        resume: async () => askText(ob, w, ins, 'Напиши свой вариант одним сообщением.', { purpose: 'other', after: ins.next }),
+        resume: async () => askText(ob, w, ins, 'Напиши свой вариант одним сообщением 🙂', { purpose: 'other', after: ins.next }),
       };
     }
     if (ins.op === 'ask') {
       const res = await answerChoice(ob, w, ins, token);
-      return res ? { ok: true, toast: 'Принято', edit: res.edit, resume: res.resume } : { ok: false, toast: 'Неизвестный вариант.' };
+      return res ? { ok: true, toast: 'Принято', edit: res.edit, resume: res.resume } : { ok: false, toast: 'Не нашёл такой вариант 🤔' };
     }
     if (ins.op === 'multi' && token === 'd') {
       const picked = ins.options.filter((o) => w.selected.includes(o.key));
@@ -384,7 +384,7 @@ export function createEngine(deps) {
     }
     if (ins.op === 'scale' && /^v\d+$/.test(token)) {
       const n = Number(token.slice(1));
-      if (n < ins.min || n > ins.max) return { ok: false, toast: 'Неверная оценка.' };
+      if (n < ins.min || n > ins.max) return { ok: false, toast: 'Выбери оценку из списка 🙂' };
       const low = n < ins.low;
       await record(ob, w, ins, { value: n, label: String(n), negative: low });
       await onb().updateOne({ _id: ob._id, 'steps.id': w.stepId }, { $set: { [`steps.$.answers.${w.qid}`]: n } });
@@ -397,7 +397,7 @@ export function createEngine(deps) {
     }
     // неподходящий токен: возвращаем ожидание
     await onb().updateOne({ _id: ob._id }, { $push: { waits: w } });
-    return { ok: false, toast: 'Не понял ответ.' };
+    return { ok: false, toast: 'Не понял ответ 🤔 Попробуй ещё раз.' };
   }
 
   /**
@@ -422,7 +422,7 @@ export function createEngine(deps) {
     if (w.purpose === 'reason') {
       await record(ob, w, ins, { value: w.value, key: w.key, label: w.label, text: clean, negative: true });
       await mood(ob, ins, `${w.label}: ${clean}`);
-      await notifyHr(ob.userId, `⚠️ Причина негативного ответа.\nВопрос: ${truncate(render(ins.text, ob), 300)}\nОтвет: ${w.label}\nПричина: ${truncate(clean, 500)}`);
+      await notifyHr(ob.userId, `⚠️ Причина негативного ответа, обратите внимание 🙏\nВопрос: ${truncate(render(ins.text, ob), 300)}\nОтвет: ${w.label}\nПричина: ${truncate(clean, 500)}`);
       return { resume: resumeAt(ob, w, w.after) };
     }
     if (w.purpose === 'other') {
