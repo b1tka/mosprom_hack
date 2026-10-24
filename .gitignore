@@ -9,3 +9,7 @@ ml/data/
 ml/chroma_db/
 ml/knowledge_base.json
 ml/stats_store.json
+
+# отчёты аналитики (генерируются, на почту уходят из сервиса)
+hr_analytics/reports/
+hr_analytics/.env
