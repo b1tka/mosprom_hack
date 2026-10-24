@@ -47,3 +47,31 @@ def upload_file(path: str) -> str:
 
 def delete_document(file_name: str) -> None:
     _client().delete_object(Bucket=config.S3_BUCKET, Key=config.S3_KNOWLEDGE_PREFIX + file_name)
+
+
+# ---------- входящие файлы от бота (S3_INCOMING_PREFIX/<id>/<имя>) ----------
+
+def exists(key: str) -> bool:
+    try:
+        _client().head_object(Bucket=config.S3_BUCKET, Key=key)
+        return True
+    except _client().exceptions.ClientError:
+        return False
+
+
+def download(key: str, target_dir: str) -> str:
+    path = os.path.join(target_dir, os.path.basename(key))
+    _client().download_file(config.S3_BUCKET, key, path)
+    return path
+
+
+def promote(key: str) -> str:
+    """Переносит входящий файл в базу знаний (knowledge/<имя>), заменяя одноимённый. Возвращает новый ключ."""
+    target = config.S3_KNOWLEDGE_PREFIX + os.path.basename(key)
+    _client().copy_object(Bucket=config.S3_BUCKET, Key=target, CopySource={"Bucket": config.S3_BUCKET, "Key": key})
+    delete_key(key)
+    return target
+
+
+def delete_key(key: str) -> None:
+    _client().delete_object(Bucket=config.S3_BUCKET, Key=key)

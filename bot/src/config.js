@@ -18,6 +18,8 @@ export const config = {
     apiUrl: process.env.ML_API_URL ?? 'http://localhost:8000',
     // LLM отвечает до 60 с (LLM_TIMEOUT в ML) + поиск по базе
     timeoutMs: Number(process.env.ML_TIMEOUT_MS ?? 90000),
+    // индексация документа: OCR сканов на CPU может идти минутами
+    indexTimeoutMs: Number(process.env.ML_INDEX_TIMEOUT_MS ?? 30 * 60 * 1000),
   },
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:29092').split(','),

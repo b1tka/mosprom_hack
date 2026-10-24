@@ -36,6 +36,7 @@ S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "change_me_too")
 S3_BUCKET = os.getenv("S3_BUCKET", "onboarding-files")
 S3_KNOWLEDGE_PREFIX = os.getenv("S3_KNOWLEDGE_PREFIX", "knowledge/")
+S3_INCOMING_PREFIX = os.getenv("S3_INCOMING_PREFIX", "incoming/")  # файлы от бота, ждут индексации
 
 # --- Kafka ---
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")

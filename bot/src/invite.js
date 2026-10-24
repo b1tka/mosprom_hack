@@ -19,7 +19,7 @@ const cleanName = (text) => {
   const value = text?.trim();
   return value && value.length <= MAX_NAME_LEN ? value : null;
 };
-const isHr = (user) => Boolean(user && HR_ROLES.includes(user.role));
+export const isHr = (user) => Boolean(user && HR_ROLES.includes(user.role));
 
 let botUsername;
 async function getBotUsername(api) {
@@ -216,7 +216,10 @@ export function registerInvites(bot) {
     const user = await findUserByMaxId(ctx.user.user_id);
     if (!user) return ctx.reply('Вас нет в системе. Обратитесь к HR, чтобы вас добавили.');
     const rows = [];
-    if (isHr(user)) rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
+    if (isHr(user)) {
+      rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
+      rows.push([Keyboard.button.callback('Добавить файл в базу знаний', 'menu:kb')]);
+    }
     if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');
     await ctx.reply('Меню:', { attachments: [Keyboard.inlineKeyboard(rows)] });
   });

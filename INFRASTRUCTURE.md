@@ -71,12 +71,17 @@ Docker Hub не скачались (401 / access denied), поэтому исп�
 - **Настроение**: классификация mood / reason / urgent той же LLM; статистика в Redis `onboarding:stats:<users.id>`.
   Источники: каждый вопрос из `/v1/ask` (в фоне, после ответа) и ответы на вопросы HR из Kafka `onboarding.answers`.
 - **База знаний**: исходные документы в S3 `onboarding-files/knowledge/`, векторная база Chroma и `knowledge_base.json` — в томе `ml_data`,
-  кэш моделей HuggingFace — в томе `hf_cache`. Индексация вручную: `docker compose run --rm ml python -m app.ingest build --from-s3`.
+  кэш моделей HuggingFace — в томе `hf_cache`. Полная переиндексация вручную: `docker compose run --rm ml python -m app.ingest build --from-s3`.
+  Отдельный документ HR добавляет через бота (`/menu` -> «Добавить файл в базу знаний», см. раздел «Бот»).
 
 Контракт:
 - `POST /v1/ask`, тело `{"user_id": "<users.id>", "question": "<строка>", "stage": null}` -> HTTP 200, тело `{"code": 200 | 400, "answer": "<строка>"}`.
   `code: 200` — ответ из базы или вежливый отказ на нерабочий вопрос; `code: 400` — рабочий вопрос, но в базе ответа нет.
 - `503` — LLM или векторная база недоступны (в т.ч. база пуста или профиль `llm` не запущен); `422` — невалидный запрос.
+- `POST /v1/documents`, тело `{"key": "incoming/<id>/<имя.pdf|.txt|.md>"}` — ML скачивает файл из S3, режет на чанки (OCR для сканов),
+  добавляет в Chroma и `knowledge_base.json` (одноимённый документ заменяется) и переносит файл в `knowledge/<имя>`.
+  Ответ 200 `{"source", "chunks_added", "replaced"}`; 400 — неверный ключ/формат или текст не извлёкся (входящий файл удаляется);
+  404 — нет файла в S3; 503 — сбой S3 или Chroma. Синхронный, может идти минуты; документы индексируются по одному (блокировка в процессе).
 - `GET /v1/stats/{user_id}`, `GET /health`; OpenAPI: http://localhost:8000/docs
 - Бот не зависит от `ml` при старте; таймаут запроса 90 с (`ML_TIMEOUT_MS`): LLM до 60 с (`LLM_TIMEOUT`) + поиск.
 
@@ -163,10 +168,17 @@ JS (ESM, Node >= 20), библиотека `@maxhub/max-bot-api`. Токен: `B
 | `src/phone.js` | нормализация телефона, проверка почты |
 | `src/state.js` | состояние диалога в Redis, ключ `dialog:<max_id>` |
 | `src/kafka.js` | продюсер; `sendHrAnswer` -> `onboarding.answers` (пока не вызывается) |
-| `src/ml.js` | `ask({ userId, question, stage })` — HTTP-клиент `POST /v1/ask` |
-| `src/s3.js` | `putFile` / `getFile` в бакете |
+| `src/knowledge.js` | загрузка HR-ом документа в базу знаний: файл из чата -> S3 -> `POST /v1/documents` -> уведомление |
+| `src/ml.js` | HTTP-клиент ML: `ask({ userId, question, stage })` -> `/v1/ask`, `addDocument({ key })` -> `/v1/documents` |
+| `src/s3.js` | `putFile` / `getFile` / `deleteFile` в бакете |
 
-Команды: `/start`, `/id` (свой `max_id`), `/menu` (интерактивное меню; пункт «Добавить нового сотрудника» только для `hr` и `hr_head`), `/cancel`.
+Команды: `/start`, `/id` (свой `max_id`), `/menu` (интерактивное меню; пункты «Добавить нового сотрудника» и «Добавить файл в базу знаний» только для `hr` и `hr_head`), `/cancel`.
+
+**Документ в базу знаний.** `/menu` -> «Добавить файл в базу знаний» (шаг `kb_await_file`) -> HR присылает файл (PDF, TXT, MD, до 50 МБ).
+Бот сразу отвечает «принят», а дальше в фоне: скачивает файл из MAX, кладёт в S3 `incoming/<uuid>/<имя>`, вызывает `POST /v1/documents`
+и присылает HR уведомление: «добавлен/обновлён, фрагментов: N» или причину ошибки. Фоном — потому что polling библиотеки ждёт обработчики,
+и индексация (минуты) иначе заблокировала бы бота для всех. При ошибке входящий файл удаляется из S3. Имя файла — имя документа в базе,
+одноимённый заменяется. Таймаут индексации 30 мин (`ML_INDEX_TIMEOUT_MS`); запрос идёт через `node:http`, т.к. у `fetch` свой лимит 5 мин.
 
 **Добавление сотрудника.** `/menu` -> «Добавить нового сотрудника» -> имя -> фамилия -> тег (кнопки) -> руководитель (кнопки) -> почта -> телефон ->
 подтверждение. Бот создаёт запись в `invites` и присылает HR QR-код (PNG, загружается в MAX) со ссылкой
@@ -205,7 +217,7 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 `S3_ROOT_PASSWORD`, `S3_BUCKET`, `S3_API_PORT`, `S3_CONSOLE_PORT`,
 `KAFKA_EXTERNAL_PORT`, `KAFKA_TOPIC_ANSWERS`, `ML_PORT`, `MENO_MODEL` (модель для Ollama),
 `MONGO_PORT`, `MONGO_DB`, `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD`, `MONGO_APP_USER`, `MONGO_APP_PASSWORD`.
-В контейнер бота compose передаёт `ML_API_URL=http://ml:8000` и `ML_TIMEOUT_MS=90000`. Остальные настройки ML (`RAG_TOP_K`, `EMBED_MODEL`,
+В контейнер бота compose передаёт `ML_API_URL=http://ml:8000` и `ML_TIMEOUT_MS=90000` (`ML_INDEX_TIMEOUT_MS` — по умолчанию 30 мин). Остальные настройки ML (`RAG_TOP_K`, `EMBED_MODEL`,
 `LLM_TIMEOUT`, `CHUNK_SIZE` и т.д.) — переменные окружения из `ml/app/config.py`, при необходимости добавляются в `environment` сервиса `ml`.
 
 Значения паролей в `.env.example` — заглушки, перед реальным использованием заменить.
@@ -229,6 +241,10 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 - Бот: `ask()` шлёт `{user_id, question, stage}` на `/v1/ask`; на `code 200`/`400` возвращает `answer`, на 503/422/сеть — исключение
   (пользователь получает «Сервис ответов временно недоступен»); против живого `ml` (с хоста и из контейнера бота) — 503 -> исключение;
   бот стартует и работает без `ml`, ошибок Kafka в логах нет.
+- Загрузка в базу знаний (из контейнера бота, `putFile` + `addDocument` против живых S3 и `ml`): новый TXT -> добавлен (1 чанк, `replaced: false`),
+  повтор -> `replaced: true`; файл без текста -> 400 и удалён из S3; нет файла -> 404; ключ не из `incoming/` или с `..` -> 400;
+  после успеха файл перенесён в `knowledge/`, из `incoming/` удалён; запущенный `ml` сразу находит новый документ поиском.
+  Тестовый документ удалён (`ingest delete --s3`), в базе снова 146 чанков.
 
 ## Не проверено
 
@@ -242,6 +258,7 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 - формат ссылки `https://max.ru/<бот>?start=<токен>` и доставка payload (`bot_started` или `/start <токен>`);
 - кнопка «Поделиться контактом»: приходит ли `max_info.user_id` и телефон в `vcf_info`;
 - показ QR-картинки HR;
+- приём файла от HR: поля вложения `file` (`payload.url`, `filename`, `size`) и скачивание по `payload.url`; уведомление после индексации;
 - единичный сбой загрузки картинки (`upload.request.error`, «Network error») воспроизвести не удалось.
 
 Также: сохранность ключа Redis после рестарта контейнера `redis`; отправка `sendHrAnswer` из бота (опросов HR пока нет).

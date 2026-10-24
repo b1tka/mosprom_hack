@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { pool, findUserByMaxId } from './db.js';
 import { redis, setState } from './state.js';
 import { registerInvites } from './invite.js';
+import { registerKnowledge } from './knowledge.js';
 import { ask } from './ml.js';
 import { connectKafka, disconnectKafka } from './kafka.js';
 
@@ -18,6 +19,7 @@ const ROLE_TITLES = {
 bot.catch((err) => console.error('bot error', err));
 
 registerInvites(bot);
+registerKnowledge(bot);
 
 // Нужен HR, чтобы внести пользователя в таблицу users
 bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id}`));

@@ -144,13 +144,15 @@ def add_document(file_path: str) -> dict:
     if not new_chunks:
         return {"status": "error", "chunks_added": 0}
 
-    data = [c for c in load_knowledge_base() if c["source"] != file_name]
+    old = load_knowledge_base()
+    data = [c for c in old if c["source"] != file_name]
+    replaced = len(data) < len(old)
     data.extend(new_chunks)
     save_knowledge_base(data)
 
     vectorstore.remove_source(file_name)  # заменяем старую версию, если была
     vectorstore.add_chunks(new_chunks)
-    return {"status": "success", "chunks_added": len(new_chunks), "source": file_name}
+    return {"status": "success", "chunks_added": len(new_chunks), "source": file_name, "replaced": replaced}
 
 
 def delete_document(file_name: str) -> dict:

@@ -12,8 +12,8 @@
 - Redis 7 (на хосте порт 6380) — состояние диалогов бота (`dialog:<max_id>`), переживает рестарт.
 - S3 — OpenMaxIO (форк консоли MinIO), образ `ghcr.io/snazy/maxio-release` (неофициальный; MinIO на Quay/Docker Hub не скачался). Бакет `onboarding-files`.
 - Kafka (KRaft, 1 нода) — топик `onboarding.answers`: ответы сотрудников на вопросы HR `{uid, hr_question, answer, stage}` -> `ml-mood-consumer` -> настроение. Бот: `sendHrAnswer` (опросы HR ещё не сделаны).
-- ML — `ml/` (Python 3.12, FastAPI, порт 8000; один образ: `ml` API и `ml-mood-consumer`). `POST /v1/ask {user_id: users.id, question, stage}` -> HTTP 200 `{code: 200|400, answer}`, 503 — LLM/база недоступны. RAG: Chroma (том `ml_data`) + эмбеддинги e5-large + LLM meno-lite-0.1 в `ollama` (compose-профиль `llm`). Документы базы знаний — в S3 `knowledge/`, индексация `python -m app.ingest`. Статистика настроения — Redis `onboarding:stats:<users.id>`. Контракт — `ml/README.md`.
-- Бот — `bot/src`: `index.js` (точка входа, `/start`, `/id`; сообщения сотрудника `employee` -> `POST /v1/ask` через `ml.js`, ответ — текст от ML), `invite.js` (`/menu`, `/cancel`, добавление сотрудника, активация по QR), `db.js`, `state.js`, `kafka.js`, `s3.js`, `phone.js`, `config.js`.
+- ML — `ml/` (Python 3.12, FastAPI, порт 8000; один образ: `ml` API и `ml-mood-consumer`). `POST /v1/ask {user_id: users.id, question, stage}` -> HTTP 200 `{code: 200|400, answer}`, 503 — LLM/база недоступны. RAG: Chroma (том `ml_data`) + эмбеддинги e5-large + LLM meno-lite-0.1 в `ollama` (compose-профиль `llm`). Документы базы знаний — в S3 `knowledge/`, индексация `python -m app.ingest`. Статистика настроения — Redis `onboarding:stats:<users.id>`. `POST /v1/documents {key: incoming/<id>/<имя>}` — добавить документ из S3 в базу (переносит в `knowledge/`). Контракт — `ml/README.md`.
+- Бот — `bot/src`: `index.js` (точка входа, `/start`, `/id`; сообщения сотрудника `employee` -> `POST /v1/ask` через `ml.js`, ответ — текст от ML), `invite.js` (`/menu`, `/cancel`, добавление сотрудника, активация по QR), `knowledge.js` (HR в `/menu` присылает файл -> S3 `incoming/` -> `/v1/documents` в фоне -> уведомление), `db.js`, `state.js`, `kafka.js`, `s3.js`, `phone.js`, `config.js`.
 
 ## Команды
 ```bash
@@ -49,4 +49,5 @@ docker compose down -v             # сброс данных, init-скрипт�
 - `hr_analytics` (ветка) читает тот же ключ статистики, но в другом формате JSON — согласовать перед влитием.
 - База знаний проиндексирована (146 чанков в томе `ml_data`, PDF в S3 `knowledge/`). Без LLM `/v1/ask` отдаёт 503 — это ожидаемо на dev-ноутбуке.
 - В shell задан `http_proxy`: для `curl localhost:...` нужен `--noproxy '*'`, иначе ответ 503 от прокси.
-- В живом MAX не проверено: ответы на вопросы сотрудника, формат deep-link со `start`, кнопка «Поделиться контактом», показ QR. Список — в `INFRASTRUCTURE.md`.
+- В живом MAX не проверено: ответы на вопросы сотрудника, формат deep-link со `start`, кнопка «Поделиться контактом», показ QR, приём файла от HR.
+- Долгие операции в обработчиках бота (индексация документа) — только в фоне: polling библиотеки ждёт все обработчики пачки, иначе бот замирает для всех. Список — в `INFRASTRUCTURE.md`.

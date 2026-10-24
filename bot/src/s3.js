@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { config } from './config.js';
 
 const { endpoint, accessKey, secretKey, bucket } = config.s3;
@@ -17,4 +17,8 @@ export async function putFile(key, body, contentType) {
 export async function getFile(key) {
   const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   return Buffer.from(await res.Body.transformToByteArray());
+}
+
+export async function deleteFile(key) {
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
