@@ -1,13 +1,15 @@
 import crypto from 'node:crypto';
 import { Keyboard } from '@maxhub/max-bot-api';
-import { findEmployeeContacts, findUserByMaxId } from './db.js';
+import { findEmployeeContacts, findUserById, findUserByMaxId } from './db.js';
 import { isHr } from './invite.js';
 import { ticketTitle } from './ml.js';
 import { sendTicketDialog } from './kafka.js';
 import { getState, redis, setState } from './state.js';
+import { getScenario } from './scenario/load.js';
+import { render as renderText, sendMessage } from './onboarding/send.js';
 import { show } from './ui.js';
 import {
-  addMessage, closeTicket, createTicket, getTicket, listClosedForHr, listForEmployee, listOpenForHr,
+  addMessage, closeTicket, createTicket, findOpenForEmployee, getTicket, listClosedForHr, listForEmployee, listOpenForHr,
   markRead, nextUnreadForHr, reopenTicket, setTitle,
 } from './tickets.js';
 
@@ -154,7 +156,7 @@ async function refineTitle(ticket, question) {
 }
 
 // Тикет из вопроса сотрудника (+ ответ бота как контекст), сотрудник входит в чат с HR, HR получает уведомление.
-async function openTicket(ctx, user, { question, answer, source }) {
+export async function openTicket(ctx, user, { question, answer, source }) {
   const maxId = ctx.user.user_id;
   const contacts = await findEmployeeContacts(user.id);
   if (!contacts?.hr) {
@@ -196,8 +198,11 @@ async function openTicket(ctx, user, { question, answer, source }) {
 // result === null — ML недоступен, тоже предлагаем HR.
 export async function replyToQuestion(ctx, user, question, result) {
   if (result?.code === 400) {
-    await ctx.reply(result.answer);
-    return openTicket(ctx, user, { question, answer: result.answer, source: 'auto' });
+    // В базе знаний ответа нет (строка 69 ТЗ): без автотикета, сотрудник сам выбирает — передать вопрос или связаться с HR
+    const sc = getScenario();
+    const qid = await rememberQa(ctx.user.user_id, question, result.answer);
+    const rows = sc.unknown_question.buttons.map((b) => [btn(b.label, b.action === 'report_problem' ? `tk:ask:${qid}` : `oa:${b.action}`)]);
+    return sendMessage(ctx.api, sc, ctx.user.user_id, { text: renderText(sc.unknown_question.text, user), img: sc.unknown_question.img, rows });
   }
   const text = result ? result.answer : 'Сервис ответов временно недоступен, попробуйте позже.';
   const qid = await rememberQa(ctx.user.user_id, question, result?.answer ?? null);
@@ -406,6 +411,40 @@ async function enterChat(ctx, ticket) {
   );
 }
 
+// «Связаться с рекрутером» / команда /HR: продолжаем открытый тикет или создаём новый и входим в чат с закреплённым HR
+export async function openContactTicket(ctx, user, { note } = {}) {
+  const contacts = await findEmployeeContacts(user.id);
+  if (!contacts?.hr) {
+    await ctx.reply(getScenario().texts.no_hr);
+    return null;
+  }
+  let ticket = await findOpenForEmployee(user.id);
+  if (!ticket) {
+    const now = new Date();
+    ticket = await createTicket({
+      employee: {
+        id: user.id, maxId: String(ctx.user.user_id), name: user.name, surname: user.surname, tag: user.tag ?? null, director: contacts.director,
+      },
+      hr: contacts.hr,
+      source: 'contact',
+      title: 'Связаться с HR',
+      messages: [{ at: now, from: 'bot', authorId: null, text: note ?? 'Сотрудник хочет связаться с HR', attachments: [] }],
+      unreadHr: 1,
+    });
+    try {
+      await ctx.api.sendMessageToUser(
+        Number(contacts.hr.maxId),
+        `🆕 ${shortName(user)} хочет связаться с HR (обращение №${ticket.number}).`,
+        { attachments: [kb([[btn('Открыть', `tk:new:${idOf(ticket)}`)]])] },
+      );
+    } catch (err) {
+      console.error('hr contact notification failed', ticket.number, err);
+    }
+  }
+  await enterChat(ctx, ticket);
+  return ticket;
+}
+
 const BACK_TO_BOT = 'Вы снова общаетесь с ботом: задавайте вопросы. Обращения к HR — в /menu.';
 
 // ---------- подключение к боту ----------
@@ -564,5 +603,24 @@ export function registerSupport(bot) {
     const reopened = await reopenTicketAsHr(ctx.api, ticket);
     if (!reopened) return ctx.answerOnCallback({ notification: 'Обращение уже открыто.' });
     return showHrCard(ctx, hr, reopened, 'Переоткрыто');
+  });
+
+  // HR начинает диалог с сотрудником (кнопка «Написать сотруднику» в уведомлениях опросов)
+  hrAction(/^tk:contact:([0-9a-f-]{36})$/, async (ctx, hr) => {
+    const emp = await findUserById(ctx.match[1]);
+    if (!emp || emp.role !== 'employee') return ctx.answerOnCallback({ notification: 'Сотрудник не найден.' });
+    let ticket = await findOpenForEmployee(emp.id);
+    if (!ticket) {
+      const contacts = await findEmployeeContacts(emp.id);
+      ticket = await createTicket({
+        employee: { id: emp.id, maxId: String(emp.max_id), name: emp.name, surname: emp.surname, tag: emp.tag ?? null, director: contacts?.director ?? null },
+        hr: { id: hr.id, maxId: hr.max_id },
+        source: 'hr',
+        title: 'Диалог по инициативе HR',
+        messages: [{ at: new Date(), from: 'bot', authorId: null, text: 'HR начал диалог с сотрудником', attachments: [] }],
+        unreadHr: 0,
+      });
+    }
+    return showHrCard(ctx, hr, ticket, `№${ticket.number}`, { fresh: true });
   });
 }

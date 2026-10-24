@@ -16,6 +16,7 @@ CREATE TABLE users (
     role_id     uuid NOT NULL REFERENCES role(id) ON DELETE RESTRICT,
     director_id uuid REFERENCES users(id) ON DELETE RESTRICT,  -- NULL у руководителей
     hr_id       uuid REFERENCES users(id) ON DELETE SET NULL,  -- закреплённый HR сотрудника (автор приглашения)
+    start_date  date,                                          -- дата выхода на работу (расписание онбординга)
     max_id      bigint NOT NULL UNIQUE,
     email       varchar,
     phone       varchar,
@@ -36,6 +37,7 @@ CREATE TABLE invites (
     director_id     uuid REFERENCES users(id) ON DELETE SET NULL,
     email           varchar NOT NULL,
     phone           varchar NOT NULL,         -- только цифры, 7XXXXXXXXXX
+    start_date      date,                     -- дата выхода: дата QR + 3 дня (выходной -> понедельник)
     created_by      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at      timestamp NOT NULL DEFAULT now(),
     expires_at      timestamp NOT NULL,

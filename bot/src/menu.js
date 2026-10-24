@@ -15,8 +15,11 @@ async function showMenu(ctx, user, notification) {
     const open = await countOpenForHr(hrScope(user));
     rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
     rows.push([Keyboard.button.callback('База знаний', 'menu:kbsec')]);
+    rows.push([Keyboard.button.callback('Мои сотрудники', 'ob:emps:0')]);
     rows.push([Keyboard.button.callback(open ? `Обращения (${open})` : 'Обращения', 'tk:list:0')]);
   } else if (user.role === 'employee') {
+    rows.push([Keyboard.button.callback('Связаться с HR', 'oa:contact_hr')]);
+    rows.push([Keyboard.button.callback('Где пообедать', 'oa:food')]);
     rows.push([Keyboard.button.callback('Мои обращения', 'my:list:open:0')]);
   }
   if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');

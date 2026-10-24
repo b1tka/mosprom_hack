@@ -27,7 +27,7 @@ async function nextNumber() {
   return doc.seq;
 }
 
-export async function createTicket({ employee, hr, source, title, messages }) {
+export async function createTicket({ employee, hr, source, title, messages, unreadHr }) {
   const now = new Date();
   const doc = {
     number: await nextNumber(),
@@ -40,7 +40,7 @@ export async function createTicket({ employee, hr, source, title, messages }) {
     category: null,
     titleSource: 'fallback',
     messages,
-    unreadHr: messages.filter((m) => m.from === 'employee').length,
+    unreadHr: unreadHr ?? messages.filter((m) => m.from === 'employee').length,
     unreadEmployee: 0,
     createdAt: now,
     lastMessageAt: now,
@@ -49,6 +49,11 @@ export async function createTicket({ employee, hr, source, title, messages }) {
   };
   const { insertedId } = await tickets.insertOne(doc);
   return { ...doc, _id: insertedId };
+}
+
+// Открытый тикет сотрудника (последний по активности): «связаться с HR» продолжает его, а не плодит новые
+export async function findOpenForEmployee(employeeId) {
+  return tickets.findOne({ 'employee.id': employeeId, status: 'open' }, { sort: { lastMessageAt: -1 } });
 }
 
 export async function getTicket(id) {

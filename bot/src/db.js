@@ -6,7 +6,7 @@ export const pool = new pg.Pool({ connectionString: config.databaseUrl });
 // bigint (max_id) приходит строкой, поэтому ищем по строковому значению
 export async function findUserByMaxId(maxId) {
   const { rows } = await pool.query(
-    `SELECT u.id, u.name, u.surname, u.max_id, u.director_id, u.hr_id,
+    `SELECT u.id, u.name, u.surname, u.max_id, u.director_id, u.hr_id, u.email, u.start_date::text AS start_date,
             r.name AS role, t.name AS tag
        FROM users u
        JOIN role r ON r.id = u.role_id
@@ -15,6 +15,35 @@ export async function findUserByMaxId(maxId) {
     [String(maxId)],
   );
   return rows[0] ?? null;
+}
+
+export async function findUserById(id) {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.name, u.surname, u.max_id, u.director_id, u.hr_id, u.email, u.start_date::text AS start_date,
+            r.name AS role, t.name AS tag
+       FROM users u
+       JOIN role r ON r.id = u.role_id
+       LEFT JOIN tag t ON t.id = u.tag_id
+      WHERE u.id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+export async function setUserStartDate(userId, isoDate) {
+  await pool.query('UPDATE users SET start_date = $2 WHERE id = $1', [userId, isoDate]);
+}
+
+// Сотрудники HR: свои (hr_id) или все (hrId = null, для hr_head)
+export async function listEmployeesOf(hrId) {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.name, u.surname, u.max_id, u.start_date::text AS start_date, t.name AS tag
+       FROM users u JOIN role r ON r.id = u.role_id LEFT JOIN tag t ON t.id = u.tag_id
+      WHERE r.name = 'employee' AND ($1::uuid IS NULL OR u.hr_id = $1)
+      ORDER BY u.created_at DESC LIMIT 100`,
+    [hrId],
+  );
+  return rows;
 }
 
 // Закреплённый HR сотрудника и его руководитель (для шапки тикета). hr — null, если HR не закреплён или уже не HR.
@@ -92,15 +121,15 @@ export async function phoneTaken(phone) {
 }
 
 // Старые неиспользованные приглашения на этот номер гасятся, действует только последнее
-export async function createInvite({ tokenHash, name, surname, tagId, directorId, email, phone, createdBy, ttlSeconds }) {
+export async function createInvite({ tokenHash, name, surname, tagId, directorId, email, phone, createdBy, ttlSeconds, startDate }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query('UPDATE invites SET expires_at = now() WHERE phone = $1 AND used_at IS NULL AND expires_at > now()', [phone]);
     const { rows } = await client.query(
-      `INSERT INTO invites (token_hash, name, surname, tag_id, director_id, email, phone, created_by, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(secs => $9)) RETURNING id`,
-      [tokenHash, name, surname, tagId, directorId, email, phone, createdBy, ttlSeconds],
+      `INSERT INTO invites (token_hash, name, surname, tag_id, director_id, email, phone, created_by, expires_at, start_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(secs => $9), $10) RETURNING id`,
+      [tokenHash, name, surname, tagId, directorId, email, phone, createdBy, ttlSeconds, startDate ?? null],
     );
     await client.query('COMMIT');
     return rows[0].id;
@@ -135,7 +164,7 @@ export async function acceptInvite({ inviteId, maxId }) {
   try {
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `SELECT i.*, i.expires_at <= now() AS expired, c.max_id AS creator_max_id FROM invites i JOIN users c ON c.id = i.created_by
+      `SELECT i.*, i.start_date::text AS start_date_s, i.expires_at <= now() AS expired, c.max_id AS creator_max_id FROM invites i JOIN users c ON c.id = i.created_by
         WHERE i.id = $1 FOR UPDATE OF i`,
       [inviteId],
     );
@@ -145,10 +174,11 @@ export async function acceptInvite({ inviteId, maxId }) {
       return { ok: false, reason: 'invalid' };
     }
     const ins = await client.query(
-      `INSERT INTO users (name, surname, tag_id, role_id, director_id, hr_id, max_id, email, phone)
-       SELECT $1,$2,$3,r.id,$4,$5,$6,$7,$8 FROM role r WHERE r.name = 'employee'
-       ON CONFLICT (max_id) DO NOTHING`,
-      [inv.name, inv.surname, inv.tag_id, inv.director_id, inv.created_by, String(maxId), inv.email, inv.phone],
+      `INSERT INTO users (name, surname, tag_id, role_id, director_id, hr_id, max_id, email, phone, start_date)
+       SELECT $1,$2,$3,r.id,$4,$5,$6,$7,$8,$9::date FROM role r WHERE r.name = 'employee'
+       ON CONFLICT (max_id) DO NOTHING
+       RETURNING id`,
+      [inv.name, inv.surname, inv.tag_id, inv.director_id, inv.created_by, String(maxId), inv.email, inv.phone, inv.start_date_s],
     );
     if (ins.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -156,7 +186,7 @@ export async function acceptInvite({ inviteId, maxId }) {
     }
     await client.query('UPDATE invites SET used_at = now(), used_by_max_id = $2 WHERE id = $1', [inviteId, String(maxId)]);
     await client.query('COMMIT');
-    return { ok: true, name: inv.name, creatorMaxId: inv.creator_max_id };
+    return { ok: true, name: inv.name, creatorMaxId: inv.creator_max_id, userId: ins.rows[0].id, startDate: inv.start_date_s };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

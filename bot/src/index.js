@@ -9,6 +9,9 @@ import { startInternalApi, stopInternalApi } from './internal.js';
 import { registerInvites } from './invite.js';
 import { registerKnowledge } from './knowledge.js';
 import { registerMenu } from './menu.js';
+import { registerOnboarding, startScheduler, stopScheduler } from './onboarding/register.js';
+import { ensureOnboardingIndexes } from './onboarding/store.js';
+import { getScenario } from './scenario/load.js';
 import { registerSupport, replyToQuestion } from './support.js';
 import { ask } from './ml.js';
 import { connectKafka, disconnectKafka } from './kafka.js';
@@ -30,6 +33,7 @@ bot.catch((err) => console.error('bot error', err));
 registerInvites(bot);
 registerKnowledge(bot);
 registerSupport(bot);
+registerOnboarding(bot);
 registerMenu(bot);
 registerAlerts(bot);
 registerAdmin(bot);
@@ -80,8 +84,11 @@ async function answerInBackground(ctx, user, question) {
 
 async function main() {
   await pool.query('SELECT 1');
+  getScenario();   // ошибка в scenario.yaml останавливает запуск с понятным сообщением
   await connectMongo();
+  await ensureOnboardingIndexes();
   await connectKafka();
+  startScheduler();
   startInternalApi(bot.api);
   startAlerts(bot.api);   // не ждём: при сбое Kafka консьюмер сам повторяет подключение
   await bot.start();
@@ -91,6 +98,7 @@ async function main() {
 async function shutdown() {
   await bot.stop?.();
   await stopAlerts();
+  stopScheduler();
   stopInternalApi();
   await disconnectKafka();
   await disconnectMongo();

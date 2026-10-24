@@ -7,6 +7,9 @@ import {
 } from './db.js';
 import { clearState, getState, setState } from './state.js';
 import { isEmail, normalizePhone } from './phone.js';
+import { hooks } from './onboarding/hooks.js';
+import { getScenario } from './scenario/load.js';
+import { defaultStartDate } from './scenario/schedule.js';
 import { show } from './ui.js';
 
 const MAX_NAME_LEN = 100;
@@ -63,15 +66,19 @@ async function askConfirm(ctx, d) {
 async function issueInvite(ctx, hr, d) {
   const username = await getBotUsername(ctx.api);
   const token = crypto.randomBytes(24).toString('base64url');
+  // дата выхода считается от генерации QR: +3 дня, выходной -> понедельник (HR может поправить в «Мои сотрудники»)
+  const startDate = defaultStartDate(new Date(), getScenario().cfg);
   await createInvite({
     tokenHash: hashToken(token),
     name: d.name, surname: d.surname, tagId: d.tagId, directorId: d.directorId,
     email: d.email, phone: d.phone, createdBy: hr.id,
     ttlSeconds: INVITE_TTL_SECONDS,
+    startDate,
   });
   const link = `https://max.ru/${username}?start=${token}`;
   const text = `Приглашение для ${d.name} ${d.surname} создано. Пусть отсканирует QR-код в MAX с аккаунта, `
-    + `привязанного к номеру +${d.phone}. Действует 7 дней, срабатывает один раз.\n\nСсылка: ${link}`;
+    + `привязанного к номеру +${d.phone}. Действует 7 дней, срабатывает один раз.\n`
+    + `Дата выхода на работу: ${startDate.split('-').reverse().join('.')} (сценарий онбординга считается от неё; изменить можно в меню «Мои сотрудники»).\n\nСсылка: ${link}`;
 
   // Приглашение уже в БД: сбой загрузки картинки не должен его терять, поэтому повторяем и в крайнем случае шлём одну ссылку
   const image = await uploadQr(ctx.api, link);
@@ -144,9 +151,14 @@ async function handleContact(ctx, state) {
       : 'Приглашение больше недействительно. Обратитесь к HR.');
   }
   await setState(maxId, { step: 'idle', data: {} });
-  await ctx.reply(`Готово, ${result.name}! Вы зарегистрированы. Напишите /start.`);
+  await ctx.reply(`Готово, ${result.name}! Вы зарегистрированы.`);
   try {
-    await ctx.api.sendMessageToUser(Number(result.creatorMaxId), `${invite.name} ${invite.surname} активировал(а) приглашение.`);
+    await hooks.onActivated({ ctx, userId: result.userId, maxId, startDate: result.startDate });
+  } catch (err) {
+    console.error('onboarding start failed', err);
+  }
+  try {
+    await ctx.api.sendMessageToUser(Number(result.creatorMaxId), `${invite.name} ${invite.surname} активировал(а) приглашение. Дата выхода: ${(result.startDate ?? '').split('-').reverse().join('.') || 'не задана'}.`);
   } catch (err) {
     console.error('creator notification failed', err);
   }
