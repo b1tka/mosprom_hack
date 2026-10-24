@@ -31,22 +31,35 @@ export async function ask({ userId, question, stage = null }) {
 // Файл, загруженный в S3 (key = incoming/<id>/<имя>), -> база знаний (POST /v1/documents).
 // Возвращает { source, chunks_added, replaced }. HTTP-ошибка -> MlError со status
 // (400 — текст не извлёкся / неверный формат, 404 — нет файла в S3, 503 — S3 или база недоступны).
+export const addDocument = ({ key }) => longRequest('POST', '/v1/documents', { key });
+
+// Имена документов базы знаний (и проиндексированных, и лежащих в S3).
+export async function listDocuments() {
+  const res = await fetch(`${apiUrl}/v1/documents`, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new MlError(res.status, await res.text());
+  return (await res.json()).documents;
+}
+
+// Удаление документа из S3, knowledge_base.json и Chroma. 404 — документа уже нет.
+// Долгий запрос: ждёт, пока ML закончит индексацию другого документа.
+export const deleteDocument = (name) => longRequest('DELETE', `/v1/documents/${encodeURIComponent(name)}`);
+
 // Через node:http, а не fetch: у fetch (undici) свой лимит ожидания ответа 5 минут, индексация бывает дольше.
-export function addDocument({ key }) {
-  const payload = JSON.stringify({ key });
+function longRequest(method, urlPath, body) {
+  const payload = body === undefined ? '' : JSON.stringify(body);
   return new Promise((resolve, reject) => {
-    const req = http.request(`${apiUrl}/v1/documents`, {
-      method: 'POST',
+    const req = http.request(`${apiUrl}${urlPath}`, {
+      method,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
       signal: AbortSignal.timeout(indexTimeoutMs),
     }, (res) => {
-      let body = '';
+      let text = '';
       res.setEncoding('utf8');
-      res.on('data', (chunk) => { body += chunk; });
+      res.on('data', (chunk) => { text += chunk; });
       res.on('end', () => {
-        if (res.statusCode !== 200) return reject(new MlError(res.statusCode, body));
+        if (res.statusCode !== 200) return reject(new MlError(res.statusCode, text));
         try {
-          resolve(JSON.parse(body));
+          resolve(JSON.parse(text));
         } catch (err) {
           reject(err);
         }

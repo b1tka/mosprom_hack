@@ -1,8 +1,11 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { Keyboard } from '@maxhub/max-bot-api';
 import { findUserByMaxId } from './db.js';
 import { isHr } from './invite.js';
-import { addDocument, MlError } from './ml.js';
+import {
+  addDocument, deleteDocument, listDocuments, MlError,
+} from './ml.js';
 import { deleteFile, putFile } from './s3.js';
 import { getState, setState } from './state.js';
 
@@ -55,7 +58,110 @@ async function processUpload(api, maxId, attachment, name) {
   }
 }
 
+// ---------- удаление документа ----------
+
+const PAGE_SIZE = 10;
+const MAX_LABEL_LEN = 60;
+const shortLabel = (name) => (name.length > MAX_LABEL_LEN ? `${name.slice(0, MAX_LABEL_LEN - 1)}…` : name);
+
+// имена держим в состоянии, в кнопках — только индекс: длинное имя не влезет в payload кнопки
+async function showDocumentsPage(ctx, docs, page) {
+  const start = page * PAGE_SIZE;
+  const rows = docs.slice(start, start + PAGE_SIZE)
+    .map((name, i) => [Keyboard.button.callback(shortLabel(name), `kbdel:${start + i}`)]);
+  const nav = [];
+  if (page > 0) nav.push(Keyboard.button.callback('← Назад', `kbpage:${page - 1}`));
+  if (start + PAGE_SIZE < docs.length) nav.push(Keyboard.button.callback('Вперёд →', `kbpage:${page + 1}`));
+  if (nav.length) rows.push(nav);
+  rows.push([Keyboard.button.callback('Отмена', 'kbdelok:no')]);
+  const pages = Math.ceil(docs.length / PAGE_SIZE);
+  const title = pages > 1 ? `Выберите файл для удаления (стр. ${page + 1} из ${pages}):` : 'Выберите файл для удаления:';
+  await ctx.reply(title, { attachments: [Keyboard.inlineKeyboard(rows)] });
+}
+
+async function processDelete(api, maxId, name) {
+  let text;
+  try {
+    await deleteDocument(name);
+    text = `Файл «${name}» удалён из базы знаний.`;
+  } catch (err) {
+    if (err instanceof MlError && err.status === 404) {
+      text = `Файла «${name}» уже нет в базе знаний.`;
+    } else {
+      console.error('knowledge delete failed', name, err);
+      text = `Не удалось удалить «${name}»: сервис временно недоступен. Попробуйте позже через /menu.`;
+    }
+  }
+  try {
+    await api.sendMessageToUser(Number(maxId), text);
+  } catch (err) {
+    console.error('knowledge notification failed', err);
+  }
+}
+
 export function registerKnowledge(bot) {
+  // кнопки удаления: проверяем и права, и шаг диалога
+  const kbAction = (re, steps, handler) => bot.action(re, async (ctx) => {
+    const maxId = ctx.user.user_id;
+    const state = await getState(maxId);
+    if (!isHr(await findUserByMaxId(maxId)) || !steps.includes(state.step)) {
+      return ctx.answerOnCallback({ notification: 'Действие неактуально. Откройте /menu.' });
+    }
+    return handler(ctx, maxId, state);
+  });
+
+  bot.action('menu:kbdel', async (ctx) => {
+    const maxId = ctx.user.user_id;
+    if (!isHr(await findUserByMaxId(maxId))) {
+      return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+    }
+    let docs;
+    try {
+      docs = await listDocuments();
+    } catch (err) {
+      console.error('knowledge list failed', err);
+      await ctx.answerOnCallback({ notification: 'Ошибка' });
+      return ctx.reply('Не удалось получить список файлов: сервис временно недоступен. Попробуйте позже.');
+    }
+    await ctx.answerOnCallback({ notification: 'Удаление из базы знаний' });
+    if (!docs.length) return ctx.reply('База знаний пуста.');
+    await setState(maxId, { step: 'kb_delete_pick', data: { docs } });
+    return showDocumentsPage(ctx, docs, 0);
+  });
+
+  kbAction(/^kbpage:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
+    const page = Number(ctx.match[1]);
+    if (page * PAGE_SIZE >= state.data.docs.length) return ctx.answerOnCallback({ notification: 'Нет такой страницы.' });
+    await ctx.answerOnCallback({ notification: `Страница ${page + 1}` });
+    return showDocumentsPage(ctx, state.data.docs, page);
+  });
+
+  kbAction(/^kbdel:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
+    const name = state.data.docs[Number(ctx.match[1])];
+    if (!name) return ctx.answerOnCallback({ notification: 'Неизвестный файл.' });
+    await setState(maxId, { step: 'kb_delete_confirm', data: { name } });
+    await ctx.answerOnCallback({ notification: shortLabel(name) });
+    const kb = Keyboard.inlineKeyboard([[
+      Keyboard.button.callback('Удалить', 'kbdelok:yes'),
+      Keyboard.button.callback('Отмена', 'kbdelok:no'),
+    ]]);
+    return ctx.reply(`Удалить «${name}» из базы знаний? Сотрудники перестанут получать ответы по нему.`, { attachments: [kb] });
+  });
+
+  kbAction(/^kbdelok:(yes|no)$/, ['kb_delete_pick', 'kb_delete_confirm'], async (ctx, maxId, state) => {
+    // состояние сбрасываем сразу, чтобы повторное нажатие не запустило удаление ещё раз
+    await setState(maxId, { step: 'idle', data: {} });
+    if (ctx.match[1] === 'no' || state.step !== 'kb_delete_confirm') {
+      await ctx.answerOnCallback({ notification: 'Отменено' });
+      return ctx.reply('Отменено.');
+    }
+    const { name } = state.data;
+    await ctx.answerOnCallback({ notification: 'Удаляю…' });
+    await ctx.reply(`Удаляю «${name}». Пришлю уведомление, когда закончу.`);
+    // в фоне: ML может ждать окончания индексации другого документа
+    processDelete(ctx.api, maxId, name);
+  });
+
   bot.action('menu:kb', async (ctx) => {
     const maxId = ctx.user.user_id;
     if (!isHr(await findUserByMaxId(maxId))) {

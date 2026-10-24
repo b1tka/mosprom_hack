@@ -1,9 +1,10 @@
 """FastAPI: POST /v1/ask -> RAG-ответ + фоновое обновление статистики настроения;
-POST /v1/documents -> добавить файл из S3 в базу знаний.
+POST /v1/documents -> добавить файл из S3 в базу знаний; GET / DELETE /v1/documents — список и удаление.
 
 Запуск:  uvicorn app.api:app --host 0.0.0.0 --port 8000
 """
 import logging
+import os
 import tempfile
 import threading
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app import config
 from app.mood import get_stats, process_message
 from app.rag import ask_rag
 
@@ -91,7 +93,7 @@ def add_document(req: DocumentRequest):
     404 — нет такого файла, 400 — неверный ключ / формат или из файла не извлёкся текст (файл удаляется),
     503 — сбой S3 или векторной базы. Может идти минуты (OCR сканов на CPU).
     """
-    from app import config, ingest, s3_docs
+    from app import ingest, s3_docs
 
     key = req.key
     parts = key[len(config.S3_INCOMING_PREFIX):].split("/") if key.startswith(config.S3_INCOMING_PREFIX) else []
@@ -114,6 +116,43 @@ def add_document(req: DocumentRequest):
         raise HTTPException(503, "S3 or vector store unavailable")
     log.info("Документ %s добавлен: %s чанков", name, result["chunks_added"])
     return DocumentResponse(source=result["source"], chunks_added=result["chunks_added"], replaced=result["replaced"])
+
+
+@app.get("/v1/documents")
+def list_documents() -> dict:
+    """Документы базы знаний: проиндексированные (knowledge_base.json) и лежащие в S3 knowledge/."""
+    from app import ingest, s3_docs
+    try:
+        indexed = {c["source"] for c in ingest.load_knowledge_base()}
+        stored = {os.path.basename(k) for k in s3_docs.list_documents()}
+    except Exception:
+        log.exception("Ошибка получения списка документов")
+        raise HTTPException(503, "S3 or knowledge base unavailable")
+    return {"documents": sorted(indexed | stored)}
+
+
+@app.delete("/v1/documents/{name}")
+def delete_document(name: str) -> dict:
+    """Удаляет документ отовсюду: чанки из knowledge_base.json и Chroma, файл из S3 knowledge/. 404 — документа нет."""
+    from app import ingest, s3_docs, vectorstore
+    if name != os.path.basename(name) or name in ("", ".", ".."):
+        raise HTTPException(400, "invalid document name")
+    try:
+        with _index_lock:
+            stored = s3_docs.exists(config.S3_KNOWLEDGE_PREFIX + name)
+            result = ingest.delete_document(name)
+            if result["status"] == "not_found" and not stored:
+                raise HTTPException(404, "document not found")
+            vectorstore.remove_source(name)  # на случай чанков в Chroma, которых нет в JSON
+            if stored:
+                s3_docs.delete_document(name)
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception("Ошибка удаления %s", name)
+        raise HTTPException(503, "S3 or vector store unavailable")
+    log.info("Документ %s удалён: %s чанков", name, result["chunks_deleted"])
+    return {"source": name, "chunks_deleted": result["chunks_deleted"]}
 
 
 @app.get("/v1/stats/{user_id}")

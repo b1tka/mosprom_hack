@@ -219,6 +219,7 @@ export function registerInvites(bot) {
     if (isHr(user)) {
       rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
       rows.push([Keyboard.button.callback('Добавить файл в базу знаний', 'menu:kb')]);
+      rows.push([Keyboard.button.callback('Удалить файл из базы знаний', 'menu:kbdel')]);
     }
     if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');
     await ctx.reply('Меню:', { attachments: [Keyboard.inlineKeyboard(rows)] });
