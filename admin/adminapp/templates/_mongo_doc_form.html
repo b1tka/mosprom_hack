@@ -1,0 +1,13 @@
+<h1>{{ coll }}: документ</h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<form class="card" hx-post="/db/mongo/c/{{ coll }}/doc" hx-target="#docbox" hx-swap="innerHTML">
+  <input type="hidden" name="id" value="{{ id }}">
+  <textarea name="body" rows="18" style="font-family:ui-monospace,monospace;width:100%">{{ json }}</textarea>
+  <p>Даты: <code>{"$date": "2026-10-24T12:00:00Z"}</code>, ObjectId: <code>{"$oid": "…"}</code>. <code>_id</code> менять нельзя.</p>
+  <p><input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button type="submit">Сохранить (заменить документ)</button></p>
+</form>
+<form class="card" hx-post="/db/mongo/c/{{ coll }}/delete" hx-target="#docbox" hx-swap="innerHTML">
+  <input type="hidden" name="id" value="{{ id }}">
+  <b>Удалить документ.</b> <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button class="danger" type="submit">Удалить</button>
+</form>

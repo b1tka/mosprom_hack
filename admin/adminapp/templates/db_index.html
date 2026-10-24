@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Базы данных{% endblock %}
+{% block content %}
+<h1>Базы данных</h1>
+<p class="err"><b>Полный доступ к данным.</b> Изменения и удаления необратимы; опасные операции требуют слова «ПОДТВЕРЖДАЮ», каждое действие пишется в журнал <code>admin_audit</code>.</p>
+<div class="grid">
+  <a class="stat" href="/db/pg"><div class="n">Postgres</div>таблицы, правка строк</a>
+  <a class="stat" href="/db/pg/sql"><div class="n">SQL</div>консоль запросов</a>
+  <a class="stat" href="/db/mongo"><div class="n">Mongo</div>коллекции и документы</a>
+  <a class="stat" href="/db/redis"><div class="n">Redis</div>ключи</a>
+  <a class="stat" href="/db/kafka"><div class="n">Kafka</div>топики, лаг, сообщения</a>
+  <a class="stat" href="/db/s3"><div class="n">S3</div>файлы бакета</a>
+</div>
+{% endblock %}

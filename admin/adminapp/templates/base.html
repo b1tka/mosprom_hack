@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false}'>
+  <title>{% block title %}Админка{% endblock %} · Корсик (тест)</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-headers='{"X-CSRF": "{{ csrf }}"}'>
+  <div class="banner">ТЕСТОВЫЙ РЕЖИМ · полный доступ к данным{% if access == 'anyone' %} · вход открыт для любого, кто написал боту /admin{% endif %}</div>
+  <header>
+    <strong>Корсик · админка</strong>
+    {% if session %}
+    <nav>
+      {% for label, href in nav %}<a href="{{ href }}" class="{{ 'on' if (path == href or (href != '/' and path.startswith(href))) else '' }}">{{ label }}</a>{% endfor %}
+    </nav>
+    <span class="who">{{ session.name or 'без имени' }} · {{ session.max_id }}
+      <button class="link" hx-post="/logout" hx-push-url="true">выйти</button></span>
+    {% endif %}
+  </header>
+  <main><div id="flash"></div>{% block content %}{% endblock %}</main>
+</body>
+</html>

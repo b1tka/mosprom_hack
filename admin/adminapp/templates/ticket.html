@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Обращение №{{ t.number }}{% endblock %}
+{% block content %}
+<p><a href="/tickets">← Обращения</a></p>
+<div id="ticket">{% include "_ticket_view.html" %}</div>
+{% endblock %}

@@ -1,0 +1,19 @@
+<h1>{{ table }}: строка</h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+<form class="card" hx-post="/db/pg/table/{{ table }}/row" hx-target="#rowbox" hx-swap="innerHTML">
+  <input type="hidden" name="pk" value="{{ pk_json }}">
+  <table class="kv">
+  {% for c in cols %}
+    <tr><td>{{ c.name }}<br><span class="muted">{{ c.type }}{{ ', ключ' if c.is_pk }}</span></td>
+      <td>{% if c.is_pk %}<code>{{ c.value }}</code>{% else %}
+        <textarea name="c__{{ c.name }}" rows="{{ 3 if c.value|length > 80 else 1 }}" style="min-height:0;width:34em">{{ c.value }}</textarea>
+        {% if c.nullable %}<label class="muted"><input type="checkbox" name="n__{{ c.name }}" {{ 'checked' if c.is_null }}> NULL</label>{% endif %}
+      {% endif %}</td></tr>
+  {% endfor %}
+  </table>
+  <p>Подтверждение: <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button type="submit">Сохранить изменения</button></p>
+</form>
+<form class="card" hx-post="/db/pg/table/{{ table }}/delete" hx-target="#rowbox" hx-swap="innerHTML">
+  <input type="hidden" name="pk" value="{{ pk_json }}">
+  <b>Удалить строку.</b> <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button class="danger" type="submit">Удалить</button>
+</form>

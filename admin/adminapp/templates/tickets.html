@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Тикеты{% endblock %}
+{% block content %}
+<h1>Обращения <span class="muted">({{ total }})</span></h1>
+<form class="filters" method="get" action="/tickets">
+  <input name="q" value="{{ q }}" placeholder="Номер, тема, сотрудник">
+  <select name="status"><option value="">любой статус</option><option value="open" {{ 'selected' if status == 'open' }}>открытые</option><option value="closed" {{ 'selected' if status == 'closed' }}>закрытые</option></select>
+  <select name="hr"><option value="">любой HR</option>{% for id, name in hr_names.items() %}<option value="{{ id }}" {{ 'selected' if hr == id }}>{{ name }}</option>{% endfor %}</select>
+  <select name="category"><option value="">любая категория</option>{% for k, v in REASON_TITLES.items() %}<option value="{{ k }}" {{ 'selected' if category == k }}>{{ v }}</option>{% endfor %}</select>
+  <button type="submit">Найти</button>
+</form>
+<div class="card">
+<table class="t">
+  <tr><th>№</th><th>Тема</th><th>Сотрудник</th><th>HR</th><th>Статус</th><th>Категория</th><th>Сообщ.</th><th>Новое</th><th>Источник</th><th>Обновлено</th></tr>
+  {% for t in items %}
+  <tr>
+    <td><a href="/tickets/{{ t._id }}">№{{ t.number }}</a></td>
+    <td>{{ t.title }}</td>
+    <td><a href="/employees/{{ t.employee.id }}">{{ t.employee.surname }} {{ t.employee.name }}</a></td>
+    <td>{{ hr_names.get(t.hrId, '—') }}</td>
+    <td><span class="chip {{ 'risk-medium' if t.status == 'open' else '' }}">{{ 'открыто' if t.status == 'open' else 'закрыто' }}</span></td>
+    <td>{{ REASON_TITLES.get(t.category, t.category or '—') }}</td>
+    <td>{{ t.messageCount if t.messageCount is defined else '' }}</td>
+    <td>{{ (t.unreadHr or 0) }}/{{ (t.unreadEmployee or 0) }}</td>
+    <td>{{ 'авто' if t.source == 'auto' else 'кнопка' }}</td>
+    <td class="nowrap">{{ t.lastMessageAt | dt }}</td>
+  </tr>
+  {% else %}<tr><td colspan="10" class="muted">Обращений не найдено.</td></tr>{% endfor %}
+</table>
+<p class="muted">«Новое»: непрочитано у HR / у сотрудника.</p>
+{% if pages > 1 %}<p>
+  {% if page > 1 %}<a href="/tickets?q={{ q|urlencode }}&status={{ status }}&hr={{ hr }}&category={{ category }}&page={{ page - 1 }}">← назад</a>{% endif %}
+  стр. {{ page }} из {{ pages }}
+  {% if page < pages %}<a href="/tickets?q={{ q|urlencode }}&status={{ status }}&hr={{ hr }}&category={{ category }}&page={{ page + 1 }}">вперёд →</a>{% endif %}
+</p>{% endif %}
+</div>
+{% endblock %}

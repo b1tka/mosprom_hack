@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Kafka{% endblock %}
+{% block content %}
+<p><a href="/db">← Базы данных</a></p>
+<h1>Kafka <span class="muted">(только чтение)</span></h1>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<div class="card"><h2>Топики</h2><table class="t"><tr><th>Топик</th><th>Партиций</th><th>Сообщений</th></tr>
+  {% for t in topics %}<tr><td><a href="/db/kafka/{{ t.topic }}">{{ t.topic }}</a></td><td>{{ t.partitions | length }}</td><td>{{ t.messages }}</td></tr>{% endfor %}
+</table></div>
+<div class="card"><h2>Лаг групп</h2><table class="t"><tr><th>Группа</th><th>Лаг</th><th>Примечание</th></tr>
+  {% for g in lag %}<tr><td>{{ g.group }}</td><td>{{ g.lag }}</td><td>{{ g.note }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

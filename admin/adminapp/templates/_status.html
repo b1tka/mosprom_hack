@@ -1,0 +1,17 @@
+<div id="status" hx-get="/status" hx-trigger="every 30s" hx-swap="outerHTML">
+  <h2>Сервисы</h2>
+  <div class="grid">
+    {% for sv in services %}
+    <div class="svc {{ 'bad' if not sv.ok else ('warn' if sv.warn else 'good') }}">
+      <span class="dot"></span><b>{{ sv.name }}</b>
+      <div class="muted">{{ sv.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <h2>Последние ошибки бота</h2>
+  {% if errors %}
+  <table class="t"><tr><th>Время</th><th>Сообщение</th></tr>
+    {% for e in errors %}<tr><td class="nowrap">{{ e.t | dt(true) }}</td><td>{{ e.msg }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Ошибок нет.</p>{% endif %}
+</div>

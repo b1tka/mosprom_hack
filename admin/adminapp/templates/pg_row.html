@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ table }}: строка{% endblock %}
+{% block content %}
+<p><a href="/db/pg/table/{{ table }}">← {{ table }}</a></p>
+<div id="rowbox">{% include "_pg_row_form.html" %}</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Redis{% endblock %}
+{% block content %}
+<p><a href="/db">← Базы данных</a></p>
+<h1>Redis</h1>
+<form class="filters" method="get"><input name="pattern" value="{{ pattern }}" placeholder="Маска: dialog:*"><button type="submit">Найти</button></form>
+<div class="card"><table class="t"><tr><th>Ключ</th><th>Тип</th><th>TTL</th></tr>
+  {% for k in items %}<tr><td><a href="/db/redis/key?name={{ k.key | urlencode }}">{{ k.key }}</a></td><td>{{ k.type }}</td><td>{{ k.ttl if k.ttl >= 0 else '—' }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">Ключей нет.</td></tr>{% endfor %}
+</table>{% if capped %}<p class="muted">Показаны первые 300 ключей, уточните маску.</p>{% endif %}</div>
+{% endblock %}

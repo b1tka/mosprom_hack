@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ topic }}{% endblock %}
+{% block content %}
+<p><a href="/db/kafka">← Kafka</a></p>
+<h1>{{ topic }}</h1>
+<p class="muted">{% for p in info.partitions %}партиция {{ p.p }}: {{ p.begin }}–{{ p.end }} · {% endfor %}</p>
+<div class="card"><table class="t"><tr><th>Время</th><th>Партиция / смещение</th><th>Ключ</th><th>Сообщение</th></tr>
+  {% for m in msgs %}<tr><td class="nowrap">{{ m.ts | dt(true) }}</td><td class="nowrap">{{ m.partition }} / {{ m.offset }}</td><td>{{ m.key or '—' }}</td><td><pre style="max-height:160px">{{ m.value }}</pre></td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Сообщений нет.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

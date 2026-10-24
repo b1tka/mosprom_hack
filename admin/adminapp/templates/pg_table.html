@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ table }}{% endblock %}
+{% block content %}
+<p><a href="/db/pg">← Postgres</a></p>
+<h1>{{ table }} <span class="muted">({{ pg.total }})</span></h1>
+<form class="filters" method="get"><input name="q" value="{{ q }}" placeholder="Поиск по всем колонкам"><button type="submit">Найти</button></form>
+{% if not pk %}<p class="muted">Первичного ключа нет: строки только для чтения.</p>{% endif %}
+<div class="card" style="overflow:auto"><table class="t">
+  <tr>{% for c in cols %}<th>{{ c.name }}<br><span class="muted">{{ c.type }}</span></th>{% endfor %}<th></th></tr>
+  {% for r in rows %}<tr>{% for cell in r.cells %}<td class="{{ 'null' if cell == 'NULL' }}">{{ cell }}</td>{% endfor %}
+    <td class="nowrap">{% if r.pk %}<a href="/db/pg/table/{{ table }}/row?pk={{ r.pk | urlencode }}">изменить</a>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="{{ cols|length + 1 }}" class="muted">Строк нет.</td></tr>{% endfor %}
+</table></div>
+{% if pg.pages > 1 %}<p>{% if pg.page > 1 %}<a href="?q={{ q|urlencode }}&page={{ pg.page - 1 }}">← назад</a>{% endif %} стр. {{ pg.page }} из {{ pg.pages }} {% if pg.page < pg.pages %}<a href="?q={{ q|urlencode }}&page={{ pg.page + 1 }}">вперёд →</a>{% endif %}</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Ошибка {{ code }}{% endblock %}
+{% block content %}
+<section class="card narrow"><h1>Ошибка {{ code }}</h1><p class="err">{{ detail }}</p><p><a href="javascript:history.back()">← назад</a> · <a href="/">на главную</a></p></section>
+{% endblock %}

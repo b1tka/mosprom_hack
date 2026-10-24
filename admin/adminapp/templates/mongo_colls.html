@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Mongo{% endblock %}
+{% block content %}
+<p><a href="/db">← Базы данных</a></p>
+<h1>Mongo</h1>
+<div class="card"><table class="t"><tr><th>Коллекция</th><th>Документов</th></tr>
+  {% for c in items %}<tr><td><a href="/db/mongo/c/{{ c.name }}">{{ c.name }}</a></td><td>{{ c.count }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

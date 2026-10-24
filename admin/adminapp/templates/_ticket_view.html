@@ -1,0 +1,46 @@
+<h1>№{{ t.number }} · {{ t.title }} <span class="chip {{ 'risk-medium' if t.status == 'open' else '' }}">{{ 'открыто' if t.status == 'open' else 'закрыто' }}</span></h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<div class="cols">
+  <section class="card">
+    <table class="kv">
+      <tr><td>Сотрудник</td><td><a href="/employees/{{ t.employee.id }}">{{ t.employee.surname }} {{ t.employee.name }}</a>{% if t.employee.tag %} · {{ t.employee.tag }}{% endif %}{% if t.employee.director %} · рук. {{ t.employee.director }}{% endif %}</td></tr>
+      <tr><td>HR</td><td>{{ hr_names.get(t.hrId, '—') }}</td></tr>
+      <tr><td>Категория</td><td>{{ REASON_TITLES.get(t.category, t.category or '—') }}</td></tr>
+      <tr><td>Источник</td><td>{{ 'авто (бот не знал ответа)' if t.source == 'auto' else 'по кнопке' }}</td></tr>
+      <tr><td>Создано</td><td>{{ t.createdAt | dt }}</td></tr>
+      {% if t.status == 'closed' %}<tr><td>Закрыто</td><td>{{ t.closedAt | dt }} · {{ 'сотрудником' if t.closedBy == 'employee' else 'HR' }}</td></tr>{% endif %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>Действия</h2>
+    {% if t.status == 'open' %}
+    <button class="danger" hx-post="/tickets/{{ t._id }}/close" hx-target="#ticket" hx-swap="innerHTML" hx-confirm="Закрыть обращение? Сотрудник получит уведомление, диалог уйдёт на оценку настроения.">Закрыть</button>
+    {% else %}
+    <button hx-post="/tickets/{{ t._id }}/reopen" hx-target="#ticket" hx-swap="innerHTML" hx-confirm="Переоткрыть обращение? Сотрудник получит уведомление.">Переоткрыть</button>
+    {% endif %}
+    <h2>Переназначить HR</h2>
+    <form hx-post="/tickets/{{ t._id }}/assign" hx-target="#ticket" hx-swap="innerHTML">
+      <select name="hr_id">{% for id, name in hr_names.items() %}<option value="{{ id }}" {{ 'selected' if t.hrId == id }}>{{ name }}</option>{% endfor %}</select>
+      <button type="submit">Назначить</button>
+    </form>
+  </section>
+</div>
+<section class="card">
+  <h2>Переписка</h2>
+  <div class="chat">
+  {% for m in t.messages %}
+    <div class="msg from-{{ m.from }}">
+      <div class="meta">{% if m.from == 'employee' %}{{ t.employee.name }}{% elif m.from == 'hr' %}HR{% if m.authorId %} · {{ authors.get(m.authorId, 'HR') }}{% else %} · из админки{% endif %}{% else %}Бот{% endif %} · {{ m.at | dt(true) }}</div>
+      <div class="body">{{ m.text }}</div>
+      {% for a in m.attachments or [] %}<span class="chip">{{ '🖼 фото' if a.type == 'image' else '📎 ' ~ (a.filename or a.type) }}</span> {% endfor %}
+    </div>
+  {% else %}<p class="muted">Сообщений нет.</p>{% endfor %}
+  </div>
+  {% if t.status == 'open' %}
+  <form hx-post="/tickets/{{ t._id }}/reply" hx-target="#ticket" hx-swap="innerHTML">
+    <textarea name="text" maxlength="3000" placeholder="Ответ сотруднику (уйдёт от имени HR через бота)" required></textarea>
+    <button type="submit">Отправить сотруднику</button>
+  </form>
+  {% endif %}
+</section>

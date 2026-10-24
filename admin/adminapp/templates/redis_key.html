@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<p><a href="/db/redis">← Redis</a></p>
+<h1>{{ name }} <span class="chip">{{ type }}</span></h1>
+<div id="rkbox">
+<div class="card"><p class="muted">TTL: {{ ttl if ttl >= 0 else 'нет' }}</p>
+<pre>{% if type == 'hash' %}{% for k, v in value.items() %}{{ k }}: {{ v }}
+{% endfor %}{% elif value is string %}{{ value }}{% else %}{% for v in value %}{{ v }}
+{% endfor %}{% endif %}</pre></div>
+<form class="card" hx-post="/db/redis/delete" hx-target="#rkbox" hx-swap="innerHTML">
+  <input type="hidden" name="name" value="{{ name }}">
+  <b>Удалить ключ.</b> <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button class="danger" type="submit">Удалить</button>
+</form></div>
+{% endblock %}

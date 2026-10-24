@@ -1,0 +1,60 @@
+<h1>{{ e.surname }} {{ e.name }} <span class="chip risk-{{ analysed.risk }}">{{ RISK_TITLES[analysed.risk] }}</span>{% if stats and stats.red_flag %} <span class="chip bad">🚩 красный флаг</span>{% endif %}</h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+<div class="cols">
+  <section class="card">
+    <h2>Профиль</h2>
+    <table class="kv">
+      <tr><td>Роль</td><td>{{ e.role }}</td></tr>
+      <tr><td>Тег</td><td>{{ e.tag or '—' }}</td></tr>
+      <tr><td>Руководитель</td><td>{{ (director.surname ~ ' ' ~ director.name) if director else '—' }}</td></tr>
+      <tr><td>max_id</td><td>{{ e.max_id }}</td></tr>
+      <tr><td>Телефон</td><td>{{ e.phone or '—' }}</td></tr>
+      <tr><td>Создан</td><td>{{ e.created_at | dt }}</td></tr>
+    </table>
+    <h2>Закреплённый HR</h2>
+    <form hx-post="/employees/{{ e.id }}/hr" hx-target="#card" hx-swap="innerHTML">
+      <select name="hr_id"><option value="">— не закреплён —</option>
+        {% for h in hr_choices %}<option value="{{ h.id }}" {{ 'selected' if hr and hr.id == h.id }}>{{ h.surname }} {{ h.name }} ({{ h.role }})</option>{% endfor %}
+      </select>
+      <button type="submit">Сохранить</button>
+    </form>
+    <h2>Email</h2>
+    <form hx-post="/employees/{{ e.id }}/email" hx-target="#card" hx-swap="innerHTML">
+      <input name="email" value="{{ e.email or '' }}" placeholder="name@company.ru" size="28">
+      <button type="submit">Сохранить</button>
+    </form>
+  </section>
+  <section class="card">
+    <h2>Настроение</h2>
+    {% if stats %}
+    <p>Индекс: <b>{{ '%.0f' % analysed.index if analysed.index is not none else '—' }}</b> · оценок: <b>{{ stats.total }}</b> · обновлено {{ stats.updated_at | dt }}</p>
+    {% for key in ['positive','neutral','negative','critical'] %}
+    <div class="bar"><span class="lbl">{{ MOOD_TITLES[key] }}</span><span class="fill {{ key }}" style="width: {{ (stats.moods[key] * 100 / stats.total) if stats.total else 0 }}%"></span><span class="val">{{ stats.moods[key] }}</span></div>
+    {% endfor %}
+    <h2>Индекс по неделям</h2>
+    {{ spark }}
+    <h2>Темы</h2>
+    <p>{% for k, n in stats.reasons.items() if n %}<span class="chip">{{ REASON_TITLES.get(k, k) }}: {{ n }}</span> {% else %}<span class="muted">нет данных</span>{% endfor %}</p>
+    {% if stats.red_flag %}
+    <p class="err">Красный флаг: {{ stats.last_reason or 'причина не указана' }}</p>
+    <button class="danger" hx-post="/employees/{{ e.id }}/reset-flag" hx-target="#card" hx-swap="innerHTML" hx-confirm="Снять красный флаг?">Снять флаг</button>
+    {% elif reset_info.red_flag_reset_at %}<p class="muted">Флаг снят {{ reset_info.red_flag_reset_at | dt }} ({{ reset_info.red_flag_reset_by }}).</p>{% endif %}
+    {% else %}<p class="muted">Оценок настроения ещё нет.</p>{% endif %}
+  </section>
+</div>
+<section class="card">
+  <h2>Последние оценки</h2>
+  {% if events %}
+  <table class="t"><tr><th>Время</th><th>Настроение</th><th>Тема</th><th>Срочно</th><th>Источник</th></tr>
+    {% for ev in events %}<tr><td class="nowrap">{{ ev.ts | dt(true) }}</td><td><span class="chip m-{{ ev.mood }}">{{ MOOD_TITLES.get(ev.mood, ev.mood) }}</span></td><td>{{ REASON_TITLES.get(ev.reason, ev.reason) }}</td><td>{{ '🚩' if ev.urgent else '' }}</td><td>{{ 'обращение №' ~ ev.ticket_number if ev.source == 'ticket' else 'вопрос боту' }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Истории нет.</p>{% endif %}
+</section>
+<section class="card">
+  <h2>Обращения</h2>
+  {% if tickets %}
+  <table class="t"><tr><th>№</th><th>Тема</th><th>Статус</th><th>Обновлено</th></tr>
+    {% for t in tickets %}<tr><td>{{ t.number }}</td><td>{{ t.title }}</td><td>{{ 'открыто' if t.status == 'open' else 'закрыто' }}</td><td class="nowrap">{{ t.lastMessageAt | dt }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Обращений нет.</p>{% endif %}
+</section>

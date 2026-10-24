@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ coll }}: документ{% endblock %}
+{% block content %}
+<p><a href="/db/mongo/c/{{ coll }}">← {{ coll }}</a></p>
+<div id="docbox">{% include "_mongo_doc_form.html" %}</div>
+{% endblock %}

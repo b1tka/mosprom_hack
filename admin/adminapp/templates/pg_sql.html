@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}SQL{% endblock %}
+{% block content %}
+<p><a href="/db/pg">← Postgres</a></p>
+<h1>SQL-консоль</h1>
+<p class="muted">Один запрос за раз. SELECT/WITH/SHOW/EXPLAIN выполняются в режиме «только чтение» (первые 500 строк, таймаут 30 с); всё остальное (INSERT, UPDATE, DELETE, DDL) требует слова «{{ CONFIRM_WORD }}» и выполняется в транзакции.</p>
+<form class="card" hx-post="/db/pg/sql" hx-target="#sqlres" hx-swap="innerHTML">
+  <textarea name="query" rows="6" placeholder="SELECT * FROM users LIMIT 10" style="font-family:ui-monospace,monospace" required>{{ query }}</textarea>
+  <p><input name="confirm" placeholder="{{ CONFIRM_WORD }} (для изменяющих запросов)" autocomplete="off" size="36"> <button type="submit">Выполнить</button></p>
+</form>
+<div id="sqlres"></div>
+{% endblock %}

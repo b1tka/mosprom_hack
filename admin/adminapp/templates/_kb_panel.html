@@ -1,0 +1,40 @@
+<div id="kbpanel" {% if running %}hx-get="/kb/panel" hx-trigger="every 3s" hx-target="#kb" hx-swap="innerHTML"{% endif %}>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<div class="cols">
+  <section class="card">
+    <h2>Документы ({{ docs | length }})</h2>
+    {% if list_err %}<p class="err">{{ list_err }}</p>{% endif %}
+    <table class="t">
+      {% for d in docs %}<tr><td>{{ d }}</td><td style="text-align:right">
+        <form hx-post="/kb/delete" hx-target="#kb" hx-swap="innerHTML" hx-confirm="Удалить «{{ d }}» из базы знаний? Сотрудники перестанут получать ответы по нему.">
+          <input type="hidden" name="name" value="{{ d }}"><button class="danger" type="submit">Удалить</button></form></td></tr>
+      {% else %}<tr><td class="muted">Документов нет.</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>Добавить документ</h2>
+    <form hx-post="/kb/upload" hx-target="#kb" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+      <input type="file" name="file" accept=".pdf,.txt,.md" required>
+      <button type="submit">Загрузить</button>
+    </form>
+    <p class="muted">PDF, TXT или MD до 50 МБ. Документ с тем же именем заменяется. Индексация идёт в фоне.</p>
+    <h2>Тестовый вопрос к RAG</h2>
+    <form hx-post="/kb/ask" hx-target="#kb" hx-swap="innerHTML" hx-disabled-elt="find button">
+      <textarea name="question" maxlength="2000" placeholder="Например: сколько дней отпуска положено?" required></textarea>
+      <button type="submit">Спросить</button>
+    </form>
+    <p class="muted">Запрос идёт от тестового uid, статистику настоящих сотрудников не трогает. Ответ может занять до минуты.</p>
+    {% if answer %}<div class="msg from-bot"><div class="meta">код {{ answer.code }} · {{ 'ответ найден' if answer.code == 200 else 'нет в базе, передаётся HR' }}</div><div class="body">{{ answer.answer }}</div></div>{% endif %}
+  </section>
+</div>
+<section class="card">
+  <h2>Последние операции</h2>
+  {% if jobs %}
+  <table class="t"><tr><th>Время</th><th>Операция</th><th>Документ</th><th>Статус</th></tr>
+    {% for j in jobs %}<tr><td class="nowrap">{{ j.at | dt(true) }}</td><td>{{ j.kind }}</td><td>{{ j.name }}</td>
+      <td>{% if j.status == 'running' %}⏳ идёт{% elif j.status == 'done' %}✅ {{ j.detail }}{% else %}<span class="err">❌ {{ j.detail }}</span>{% endif %}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Операций не было.</p>{% endif %}
+</section>
+</div>

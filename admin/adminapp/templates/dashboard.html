@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Обзор{% endblock %}
+{% block content %}
+<h1>Обзор</h1>
+<div class="grid stats">
+  <div class="stat"><div class="n">{{ c.employees }}</div>новых сотрудников</div>
+  <div class="stat"><div class="n">{{ c.tickets_open }}</div>открытых обращений <span class="muted">из {{ c.tickets_total }}</span></div>
+  <div class="stat {{ 'alert' if c.flagged }}"><div class="n">{{ c.flagged | length }}</div>красных флагов</div>
+  <div class="stat"><div class="n">{{ c.events_24h }}</div>оценок настроения за 24 ч</div>
+</div>
+
+<div class="cols">
+  <section class="card">
+    <h2>Настроение за 7 дней</h2>
+    {% set total = c.moods_7d.values() | sum %}
+    {% for key, label in [('positive','позитив'),('neutral','нейтрально'),('negative','негатив'),('critical','критично')] %}
+    <div class="bar"><span class="lbl">{{ label }}</span><span class="fill {{ key }}" style="width: {{ (c.moods_7d[key] * 100 / total) if total else 0 }}%"></span><span class="val">{{ c.moods_7d[key] }}</span></div>
+    {% endfor %}
+    {% if not total %}<p class="muted">Оценок за период нет.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Красные флаги</h2>
+    {% if c.flagged %}
+    <table class="t"><tr><th>Сотрудник</th><th>Причина</th><th>Обновлено</th></tr>
+      {% for f in c.flagged %}<tr><td>{{ f.name }}</td><td>{{ f.last_reason or '—' }}</td><td class="nowrap">{{ f.updated_at | dt }}</td></tr>{% endfor %}
+    </table>
+    {% else %}<p class="muted">Активных флагов нет.</p>{% endif %}
+    <h2>Пользователи по ролям</h2>
+    <p>{% for role, n in c.users.items() %}<span class="chip">{{ role }}: {{ n }}</span> {% endfor %}</p>
+  </section>
+</div>
+
+<section class="card">{% include "_status.html" %}</section>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ e.surname }} {{ e.name }}{% endblock %}
+{% block content %}
+<p><a href="/employees">← Сотрудники</a></p>
+<div id="card">{% include "_employee_card.html" %}</div>
+{% endblock %}

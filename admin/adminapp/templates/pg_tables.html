@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Postgres{% endblock %}
+{% block content %}
+<p><a href="/db">← Базы данных</a></p>
+<h1>Postgres <a class="chip" href="/db/pg/sql">SQL-консоль</a></h1>
+<div class="card"><table class="t"><tr><th>Таблица</th><th>Строк</th></tr>
+  {% for t in items %}<tr><td><a href="/db/pg/table/{{ t.name }}">{{ t.name }}</a></td><td>{{ t.rows }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

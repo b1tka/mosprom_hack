@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники{% endblock %}
+{% block content %}
+<h1>Сотрудники <span class="muted">({{ total }})</span></h1>
+<form class="filters" method="get" action="/employees">
+  <input name="q" value="{{ q }}" placeholder="Имя, email, max_id">
+  <select name="tag"><option value="">все теги</option>{% for t in tags %}<option {{ 'selected' if t == tag }}>{{ t }}</option>{% endfor %}</select>
+  <select name="risk"><option value="">любой риск</option>{% for k, v in RISK_TITLES.items() %}<option value="{{ k }}" {{ 'selected' if k == risk }}>{{ v }}</option>{% endfor %}</select>
+  <label><input type="checkbox" name="flag" value="1" {{ 'checked' if flag == '1' }}> только с красным флагом</label>
+  <button type="submit">Найти</button>
+</form>
+<div class="card">
+<table class="t">
+  <tr><th>Сотрудник</th><th>Тег</th><th>Руководитель</th><th>HR</th><th>Email</th><th>Риск</th><th>Индекс</th><th>Оценок</th><th>Обращения</th><th>Обновлено</th></tr>
+  {% for i in items %}{% set r = i.row %}
+  <tr>
+    <td><a href="/employees/{{ r.person.id }}">{{ r.person.surname }} {{ r.person.name }}</a>{% if i.flag %} <span class="chip bad">🚩</span>{% endif %}</td>
+    <td>{{ r.person.tag or '—' }}</td>
+    <td>{{ r.director.short_name if r.director else '—' }}</td>
+    <td>{{ i.hr.short_name if i.hr else '—' }}</td>
+    <td>{{ r.person.email or '—' }}</td>
+    <td><span class="chip risk-{{ r.risk }}">{{ RISK_TITLES[r.risk] }}</span></td>
+    <td>{{ '%.0f' % r.index if r.index is not none else '—' }}</td>
+    <td>{{ r.total }}</td>
+    <td>{{ i.tickets.open }} / {{ i.tickets.closed }}</td>
+    <td class="nowrap">{{ r.stats.updated_at | dt if r.stats else '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="10" class="muted">Никого не найдено.</td></tr>{% endfor %}
+</table>
+<p class="muted">Обращения: открытых / закрытых. Индекс 0–100: позитив 100, нейтрально 60, негатив 25, критично 0.</p>
+</div>
+{% endblock %}

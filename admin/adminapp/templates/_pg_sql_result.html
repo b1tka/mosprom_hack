@@ -1,0 +1,11 @@
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+{% if result %}
+<div class="card" style="overflow:auto">
+  {% if result.cols %}
+  <p class="muted">Строк: {{ result.rows | length }}{{ ' (показаны первые 500)' if result.truncated }}</p>
+  <table class="t"><tr>{% for c in result.cols %}<th>{{ c }}</th>{% endfor %}</tr>
+    {% for row in result.rows %}<tr>{% for cell in row %}<td class="{{ 'null' if cell == 'NULL' }}">{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+  </table>
+  {% else %}<p class="ok">Выполнено. Затронуто строк: {{ result.affected }}.</p>{% endif %}
+</div>
+{% endif %}

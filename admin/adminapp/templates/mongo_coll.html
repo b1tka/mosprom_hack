@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ coll }}{% endblock %}
+{% block content %}
+<p><a href="/db/mongo">← Mongo</a></p>
+<h1>{{ coll }} <span class="muted">({{ pg.total }})</span></h1>
+<form class="filters" method="get"><input name="filter" value="{{ filter }}" placeholder='Фильтр JSON, например {"status": "open"}' size="50"><button type="submit">Найти</button></form>
+<div id="mongobox">
+{% for d in items %}
+<div class="card"><pre>{{ d.json }}</pre><a href="/db/mongo/c/{{ coll }}/doc?id={{ d.id }}">изменить / удалить</a></div>
+{% else %}<p class="muted">Документов нет.</p>{% endfor %}
+</div>
+{% if pg.pages > 1 %}<p>{% if pg.page > 1 %}<a href="?filter={{ filter|urlencode }}&page={{ pg.page - 1 }}">← назад</a>{% endif %} стр. {{ pg.page }} из {{ pg.pages }} {% if pg.page < pg.pages %}<a href="?filter={{ filter|urlencode }}&page={{ pg.page + 1 }}">вперёд →</a>{% endif %}</p>{% endif %}
+<details class="card"><summary>Добавить документ</summary>
+  <form hx-post="/db/mongo/c/{{ coll }}/insert" hx-target="#mongobox" hx-swap="innerHTML">
+    <textarea name="body" rows="6" placeholder='{"поле": "значение"}' required></textarea>
+    <p><input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button type="submit">Добавить</button></p>
+  </form></details>
+<details class="card"><summary>Удалить коллекцию целиком</summary>
+  <form hx-post="/db/mongo/c/{{ coll }}/drop" hx-target="#mongobox" hx-swap="innerHTML">
+    <p class="err">Необратимо. Введите имя коллекции и слово подтверждения.</p>
+    <input name="name" placeholder="{{ coll }}" autocomplete="off"> <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14">
+    <button class="danger" type="submit">Удалить коллекцию</button>
+  </form></details>
+{% endblock %}

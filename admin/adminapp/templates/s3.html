@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}S3{% endblock %}
+{% block content %}
+<p><a href="/db">← Базы данных</a></p>
+<h1>S3 · {{ bucket }}</h1>
+<form class="filters" method="get"><input name="prefix" value="{{ prefix }}" placeholder="Префикс: knowledge/"><button type="submit">Показать</button></form>
+<div id="s3box" class="card"><table class="t"><tr><th>Объект</th><th>Размер</th><th>Изменён</th><th></th></tr>
+  {% for o in items %}<tr><td>{{ o.key }}</td><td class="nowrap">{{ '%.1f' % (o.size / 1024) }} КБ</td><td class="nowrap">{{ o.modified | dt }}</td>
+    <td class="nowrap"><a href="/db/s3/download?key={{ o.key | urlencode }}">скачать</a>
+      <form style="display:inline" hx-post="/db/s3/delete" hx-target="#s3box" hx-swap="innerHTML" hx-confirm="Удалить объект {{ o.key }}? Слово подтверждения — в поле справа.">
+        <input type="hidden" name="key" value="{{ o.key }}"><input name="confirm" placeholder="{{ CONFIRM_WORD }}" size="10" autocomplete="off"><button class="danger" type="submit">удалить</button></form></td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Объектов нет.</td></tr>{% endfor %}
+</table>{% if capped %}<p class="muted">Показаны первые 300 объектов.</p>{% endif %}</div>
+{% endblock %}
