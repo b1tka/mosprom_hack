@@ -212,19 +212,6 @@ export function registerInvites(bot) {
     }
   });
 
-  bot.command('menu', async (ctx) => {
-    const user = await findUserByMaxId(ctx.user.user_id);
-    if (!user) return ctx.reply('Вас нет в системе. Обратитесь к HR, чтобы вас добавили.');
-    const rows = [];
-    if (isHr(user)) {
-      rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
-      rows.push([Keyboard.button.callback('Добавить файл в базу знаний', 'menu:kb')]);
-      rows.push([Keyboard.button.callback('Удалить файл из базы знаний', 'menu:kbdel')]);
-    }
-    if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');
-    await ctx.reply('Меню:', { attachments: [Keyboard.inlineKeyboard(rows)] });
-  });
-
   bot.action('menu:add', async (ctx) => {
     const maxId = ctx.user.user_id;
     if (!isHr(await findUserByMaxId(maxId))) {

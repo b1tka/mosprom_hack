@@ -6,7 +6,7 @@ export const pool = new pg.Pool({ connectionString: config.databaseUrl });
 // bigint (max_id) приходит строкой, поэтому ищем по строковому значению
 export async function findUserByMaxId(maxId) {
   const { rows } = await pool.query(
-    `SELECT u.id, u.name, u.surname, u.max_id, u.director_id,
+    `SELECT u.id, u.name, u.surname, u.max_id, u.director_id, u.hr_id,
             r.name AS role, t.name AS tag
        FROM users u
        JOIN role r ON r.id = u.role_id
@@ -15,6 +15,25 @@ export async function findUserByMaxId(maxId) {
     [String(maxId)],
   );
   return rows[0] ?? null;
+}
+
+// Закреплённый HR сотрудника и его руководитель (для шапки тикета). hr — null, если HR не закреплён или уже не HR.
+export async function findEmployeeContacts(userId) {
+  const { rows } = await pool.query(
+    `SELECT h.id AS hr_id, h.max_id AS hr_max_id, h.name AS hr_name, h.surname AS hr_surname,
+            d.name AS director_name, d.surname AS director_surname
+       FROM users u
+       LEFT JOIN (users h JOIN role hr ON hr.id = h.role_id AND hr.name IN ('hr', 'hr_head')) ON h.id = u.hr_id
+       LEFT JOIN users d ON d.id = u.director_id
+      WHERE u.id = $1`,
+    [userId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    hr: row.hr_id && row.hr_max_id ? { id: row.hr_id, maxId: row.hr_max_id, name: row.hr_name, surname: row.hr_surname } : null,
+    director: row.director_name ? `${row.director_name} ${row.director_surname}` : null,
+  };
 }
 
 export async function listTags() {
@@ -93,10 +112,10 @@ export async function acceptInvite({ inviteId, maxId }) {
       return { ok: false, reason: 'invalid' };
     }
     const ins = await client.query(
-      `INSERT INTO users (name, surname, tag_id, role_id, director_id, max_id, email, phone)
-       SELECT $1,$2,$3,r.id,$4,$5,$6,$7 FROM role r WHERE r.name = 'employee'
+      `INSERT INTO users (name, surname, tag_id, role_id, director_id, hr_id, max_id, email, phone)
+       SELECT $1,$2,$3,r.id,$4,$5,$6,$7,$8 FROM role r WHERE r.name = 'employee'
        ON CONFLICT (max_id) DO NOTHING`,
-      [inv.name, inv.surname, inv.tag_id, inv.director_id, String(maxId), inv.email, inv.phone],
+      [inv.name, inv.surname, inv.tag_id, inv.director_id, inv.created_by, String(maxId), inv.email, inv.phone],
     );
     if (ins.rowCount === 0) {
       await client.query('ROLLBACK');

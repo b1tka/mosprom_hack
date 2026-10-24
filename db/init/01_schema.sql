@@ -15,6 +15,7 @@ CREATE TABLE users (
     tag_id      uuid REFERENCES tag(id) ON DELETE SET NULL,
     role_id     uuid NOT NULL REFERENCES role(id) ON DELETE RESTRICT,
     director_id uuid REFERENCES users(id) ON DELETE RESTRICT,  -- NULL у руководителей
+    hr_id       uuid REFERENCES users(id) ON DELETE SET NULL,  -- закреплённый HR сотрудника (автор приглашения)
     max_id      bigint NOT NULL UNIQUE,
     email       varchar,
     phone       varchar,
@@ -24,6 +25,7 @@ CREATE TABLE users (
 
 CREATE INDEX users_director_id_idx ON users(director_id);
 CREATE INDEX users_role_id_idx ON users(role_id);
+CREATE INDEX users_hr_id_idx ON users(hr_id);
 
 CREATE TABLE invites (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),

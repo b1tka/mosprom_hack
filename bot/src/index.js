@@ -4,8 +4,11 @@ import { pool, findUserByMaxId } from './db.js';
 import { redis, setState } from './state.js';
 import { registerInvites } from './invite.js';
 import { registerKnowledge } from './knowledge.js';
+import { registerMenu } from './menu.js';
+import { registerSupport, replyToQuestion } from './support.js';
 import { ask } from './ml.js';
 import { connectKafka, disconnectKafka } from './kafka.js';
+import { connectMongo, disconnectMongo } from './mongo.js';
 
 const bot = new Bot(config.botToken);
 
@@ -18,8 +21,11 @@ const ROLE_TITLES = {
 
 bot.catch((err) => console.error('bot error', err));
 
+// порядок важен: middleware шагов диалога (приглашения, база знаний, чат с HR) — до общего обработчика сообщений
 registerInvites(bot);
 registerKnowledge(bot);
+registerSupport(bot);
+registerMenu(bot);
 
 // Нужен HR, чтобы внести пользователя в таблицу users
 bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id}`));
@@ -34,7 +40,7 @@ bot.command('start', async (ctx) => {
   await ctx.reply(`Здравствуйте, ${user.name}! Ваша роль: ${ROLE_TITLES[user.role] ?? user.role}.`);
 });
 
-// Любое текстовое сообщение (не команда) -> ML-модуль, ответ придёт через Kafka
+// Любое текстовое сообщение (не команда) нового сотрудника — вопрос к RAG ML-сервиса
 bot.on('message_created', async (ctx) => {
   const text = ctx.message?.body?.text;
   if (!text || text.startsWith('/')) return;
@@ -45,19 +51,19 @@ bot.on('message_created', async (ctx) => {
 
   // Любое сообщение нового сотрудника — вопрос к RAG ML-сервиса; настроение ML считает сам, в фоне
   if (user.role !== 'employee') return ctx.reply('Откройте /menu, чтобы выбрать действие.');
-  let result;
+  let result = null;
   try {
     result = await ask({ userId: user.id, question: text });
   } catch (err) {
     console.error('ml api failed', err);
-    return ctx.reply('Сервис ответов временно недоступен, попробуйте позже.');
   }
-  // 200 — ответ из базы (или вежливый отказ на нерабочий вопрос), 400 — ответа в базе нет; текст в обоих случаях от ML
-  return ctx.reply(result.answer);
+  // 200 — ответ + кнопка «Связаться с HR», 400 — ответа в базе нет, тикет HR создаётся сам; null — ML недоступен
+  return replyToQuestion(ctx, user, text, result);
 });
 
 async function main() {
   await pool.query('SELECT 1');
+  await connectMongo();
   await connectKafka();
   await bot.start();
   console.log('bot started');
@@ -66,6 +72,7 @@ async function main() {
 async function shutdown() {
   await bot.stop?.();
   await disconnectKafka();
+  await disconnectMongo();
   await pool.end();
   redis.disconnect();
   process.exit(0);

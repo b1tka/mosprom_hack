@@ -1,5 +1,6 @@
 """FastAPI: POST /v1/ask -> RAG-ответ + фоновое обновление статистики настроения;
-POST /v1/documents -> добавить файл из S3 в базу знаний; GET / DELETE /v1/documents — список и удаление.
+POST /v1/documents -> добавить файл из S3 в базу знаний; GET / DELETE /v1/documents — список и удаление;
+POST /v1/ticket-title -> тема и категория обращения к HR.
 
 Запуск:  uvicorn app.api:app --host 0.0.0.0 --port 8000
 """
@@ -153,6 +154,29 @@ def delete_document(name: str) -> dict:
         raise HTTPException(503, "S3 or vector store unavailable")
     log.info("Документ %s удалён: %s чанков", name, result["chunks_deleted"])
     return {"source": name, "chunks_deleted": result["chunks_deleted"]}
+
+
+class TicketTitleRequest(BaseModel):
+    text: str  # первое сообщение обращения (вопрос сотрудника)
+
+
+class TicketTitleResponse(BaseModel):
+    title: str     # тема в 3-6 слов
+    category: str  # одна из REASONS классификатора настроения
+
+
+@app.post("/v1/ticket-title", response_model=TicketTitleResponse)
+def ticket_title(req: TicketTitleRequest):
+    """Тема и категория обращения к HR. 503 — LLM недоступна или ответ не разобрался (бот оставит временный заголовок)."""
+    from app.ticket import make_title
+    try:
+        result = make_title(req.text)
+    except Exception:
+        log.exception("Ошибка генерации темы обращения")
+        raise HTTPException(503, "model unavailable")
+    if result is None:
+        raise HTTPException(503, "model answer could not be parsed")
+    return TicketTitleResponse(**result)
 
 
 @app.get("/v1/stats/{user_id}")

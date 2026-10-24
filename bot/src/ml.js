@@ -33,6 +33,18 @@ export async function ask({ userId, question, stage = null }) {
 // (400 — текст не извлёкся / неверный формат, 404 — нет файла в S3, 503 — S3 или база недоступны).
 export const addDocument = ({ key }) => longRequest('POST', '/v1/documents', { key });
 
+// Тема и категория обращения к HR: { title, category }. 503 (LLM недоступна) и прочее — исключение.
+export async function ticketTitle(text) {
+  const res = await fetch(`${apiUrl}/v1/ticket-title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new MlError(res.status, await res.text());
+  return res.json();
+}
+
 // Имена документов базы знаний (и проиндексированных, и лежащих в S3).
 export async function listDocuments() {
   const res = await fetch(`${apiUrl}/v1/documents`, { signal: AbortSignal.timeout(timeoutMs) });

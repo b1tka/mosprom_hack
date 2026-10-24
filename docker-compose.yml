@@ -20,7 +20,7 @@ services:
       retries: 10
     networks: [onboarding-net]
 
-  # MongoDB: пока только инфраструктура, коллекции и клиенты появятся позже
+  # MongoDB: обращения сотрудников к HR (коллекции tickets, counters), пишет бот
   mongo:
     image: mongo:8.0.34
     restart: unless-stopped
@@ -228,6 +228,8 @@ services:
     # от ml не зависит: бот работает и без ML, на вопросы отвечает «сервис временно недоступен»
     depends_on:
       postgres:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
       redis:
         condition: service_healthy

@@ -4,16 +4,19 @@
 
 ## Статус
 Инфраструктура в Docker, работающий бот (`bot/`, JS, `@maxhub/max-bot-api`) и ML-сервис (`ml/`, FastAPI): RAG по базе знаний и оценка настроения — код ML-команды, перенесён из веток `ml_ai`/`mood_find`. ML-разработка дальше — в `ml/` от `main`.
+Готово и закоммичено: добавление сотрудника HR-ом через QR; ответы сотруднику из RAG; HR в `/menu` добавляет и удаляет файлы базы знаний.
+Написано, но НЕ проверено и НЕ закоммичено: обращения сотрудник ↔ HR (тикеты в MongoDB, `support.js`). Следующий шаг — проверить на моках (как проверяли приглашения и базу знаний), потом коммит по команде пользователя.
+Проект развёрнут пользователем на VPS (там же LLM); на dev-ноутбуке LLM нет. Деплой — раздел «Деплой на VPS» в `INFRASTRUCTURE.md`.
 Подробности: `INFRASTRUCTURE.md`. Документация MAX для JS: https://dev.max.ru/docs/chatbots/bots-coding/js
 
 ## Стек
-- Postgres 16 — `users`, `role`, `tag`, `invites` (`db/init/*.sql` выполняются только при первом старте тома; для живой БД — `db/migrations/`, вручную).
-- MongoDB 8 (на хосте порт 27018; 27017 занят локальным MongoDB) — пока только инфраструктура, назначение опишет пользователь. Пользователь приложения с `readWrite` на базу `onboarding` (`db/mongo-init/`), сервисам передаётся `MONGO_URL`.
+- Postgres 16 — `users` (`hr_id` — закреплённый HR), `role`, `tag`, `invites` (`db/init/*.sql` выполняются только при первом старте тома; для живой БД — `db/migrations/`, вручную).
+- MongoDB 8 (на хосте порт 27018; 27017 занят локальным MongoDB) — обращения сотрудников к HR: коллекции `tickets` (тикет с перепиской) и `counters` (номер тикета), пишет бот. Пользователь приложения с `readWrite` на базу `onboarding` (`db/mongo-init/`), сервисам передаётся `MONGO_URL`.
 - Redis 7 (на хосте порт 6380) — состояние диалогов бота (`dialog:<max_id>`), переживает рестарт.
 - S3 — OpenMaxIO (форк консоли MinIO), образ `ghcr.io/snazy/maxio-release` (неофициальный; MinIO на Quay/Docker Hub не скачался). Бакет `onboarding-files`.
 - Kafka (KRaft, 1 нода) — топик `onboarding.answers`: ответы сотрудников на вопросы HR `{uid, hr_question, answer, stage}` -> `ml-mood-consumer` -> настроение. Бот: `sendHrAnswer` (опросы HR ещё не сделаны).
-- ML — `ml/` (Python 3.12, FastAPI, порт 8000; один образ: `ml` API и `ml-mood-consumer`). `POST /v1/ask {user_id: users.id, question, stage}` -> HTTP 200 `{code: 200|400, answer}`, 503 — LLM/база недоступны. RAG: Chroma (том `ml_data`) + эмбеддинги e5-large + LLM meno-lite-0.1 в `ollama` (compose-профиль `llm`). Документы базы знаний — в S3 `knowledge/`, индексация `python -m app.ingest`. Статистика настроения — Redis `onboarding:stats:<users.id>`. `POST /v1/documents {key: incoming/<id>/<имя>}` — добавить документ из S3 в базу (переносит в `knowledge/`); `GET /v1/documents` — список; `DELETE /v1/documents/{имя}` — удалить из S3, JSON и Chroma. Контракт — `ml/README.md`.
-- Бот — `bot/src`: `index.js` (точка входа, `/start`, `/id`; сообщения сотрудника `employee` -> `POST /v1/ask` через `ml.js`, ответ — текст от ML), `invite.js` (`/menu`, `/cancel`, добавление сотрудника, активация по QR), `knowledge.js` (HR в `/menu`: добавить файл -> S3 `incoming/` -> `/v1/documents` в фоне -> уведомление; удалить файл -> список кнопками -> подтверждение -> `DELETE` в фоне -> уведомление), `db.js`, `state.js`, `kafka.js`, `s3.js`, `phone.js`, `config.js`.
+- ML — `ml/` (Python 3.12, FastAPI, порт 8000; один образ: `ml` API и `ml-mood-consumer`). `POST /v1/ask {user_id: users.id, question, stage}` -> HTTP 200 `{code: 200|400, answer}`, 503 — LLM/база недоступны. RAG: Chroma (том `ml_data`) + эмбеддинги e5-large + LLM meno-lite-0.1 в `ollama` (compose-профиль `llm`). Документы базы знаний — в S3 `knowledge/`, индексация `python -m app.ingest`. Статистика настроения — Redis `onboarding:stats:<users.id>`. `POST /v1/documents {key: incoming/<id>/<имя>}` — добавить документ из S3 в базу (переносит в `knowledge/`); `GET /v1/documents` — список; `DELETE /v1/documents/{имя}` — удалить из S3, JSON и Chroma; `POST /v1/ticket-title {text}` — тема и категория тикета (LLM). Контракт — `ml/README.md`.
+- Бот — `bot/src`: `index.js` (точка входа, `/start`, `/id`; сообщения сотрудника `employee` -> `POST /v1/ask` через `ml.js`, ответ — текст от ML + кнопка «Связаться с HR», при `code 400` — тикет сам), `menu.js` (`/menu`: HR — добавить сотрудника / База знаний / Обращения; сотрудник — Мои обращения), `support.js` + `tickets.js` + `mongo.js` (тикеты сотрудник ↔ закреплённый HR: чат `ticket_chat` / ответ HR `ticket_reply`, `/bot` — выход, архив, вложения), `invite.js` (`/cancel`, добавление сотрудника, активация по QR), `knowledge.js` (HR в `/menu`: добавить файл -> S3 `incoming/` -> `/v1/documents` в фоне -> уведомление; удалить файл -> список кнопками -> подтверждение -> `DELETE` в фоне -> уведомление), `db.js`, `state.js`, `kafka.js`, `s3.js`, `phone.js`, `config.js`.
 
 ## Команды
 ```bash
@@ -45,9 +48,13 @@ docker compose down -v             # сброс данных, init-скрипт�
 - На хосте уже есть локальный Redis с паролем на 127.0.0.1:6379 — поэтому наш проброшен на 6380.
 - Библиотека MAX скрывает причину сетевых ошибок загрузки («Network error»), при сбоях смотреть `docker compose logs bot`.
 - Коммит и пуш — только по явной команде пользователя, без строки `Claude-Session`. Роль Евгения (`hr`) для тестов не менять: функции `employee` проверяет второй человек.
+- Большие фичи: сначала подробные уточняющие вопросы и итоговый план, реализация — после «утверждаю». Проверки — моками бота/ctx поверх живых Postgres/Redis/Mongo/S3/ML; тестовые данные после проверки удалять.
+- Отложено (пользователь не выбрал, может вернуться): переписка тикетов -> Kafka `onboarding.answers` (анализ настроения), проставить `hr_id` старым сотрудникам из `invites.created_by`, оценка после закрытия тикета; `ENV PYTHONUNBUFFERED=1` в `ml/Dockerfile` (сейчас `print` индексации в логах `ml` появляется с задержкой).
+- Docker на dev-ноутбуке иногда перезапускается и оставляет `mongo` / `ml-mood-consumer` в `Exited` — проверять `docker compose ps -a` и поднимать.
 - LLM на этом ноутбуке не запускать (8 ГБ на Docker, нужно >= 12): работать без профиля `llm`; после проверок модель не оставлять запущенной. Запуск планируется на другой машине.
 - `hr_analytics` (ветка) читает тот же ключ статистики, но в другом формате JSON — согласовать перед влитием.
 - База знаний проиндексирована (146 чанков в томе `ml_data`, PDF в S3 `knowledge/`). Без LLM `/v1/ask` отдаёт 503 — это ожидаемо на dev-ноутбуке.
 - В shell задан `http_proxy`: для `curl localhost:...` нужен `--noproxy '*'`, иначе ответ 503 от прокси.
-- В живом MAX не проверено: ответы на вопросы сотрудника, формат deep-link со `start`, кнопка «Поделиться контактом», показ QR, приём файла от HR.
+- В живом MAX не проверено: ответы на вопросы сотрудника, формат deep-link со `start`, кнопка «Поделиться контактом», показ QR. Загрузку файла HR-ом пользователь подтвердил на VPS («всё работает»).
+- Тикеты (обращения к HR) написаны, но ещё не проверялись ни на моках, ни в MAX; миграция `db/migrations/003_users_hr.sql` к живой БД не применена (на VPS тоже применить вручную).
 - Долгие операции в обработчиках бота (индексация документа) — только в фоне: polling библиотеки ждёт все обработчики пачки, иначе бот замирает для всех. Список — в `INFRASTRUCTURE.md`.

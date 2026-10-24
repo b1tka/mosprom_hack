@@ -8,6 +8,8 @@ export const config = {
   botToken: required('BOT_TOKEN'),
   databaseUrl: process.env.DATABASE_URL ?? 'postgres://onboarding:change_me@localhost:5432/onboarding',
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6380',
+  // база берётся из пути URL (/onboarding)
+  mongoUrl: process.env.MONGO_URL ?? 'mongodb://onboarding:change_me_mongo@localhost:27018/onboarding',
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
     accessKey: process.env.S3_ACCESS_KEY ?? 'minioadmin',
