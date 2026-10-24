@@ -208,6 +208,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "Сценарий онбординга"
+if dc ps --format '{{.Service}}|{{.State}}' 2>/dev/null | grep -q '^bot|running'; then
+  if dc exec -T bot node -e "import('./src/scenario/load.js').then((m)=>{const s=m.loadScenario();console.log('steps='+s.steps.length)}).catch((e)=>{console.error(e.message);process.exit(1)})" 2>&1 | grep -q '^steps='; then ok "scenario.yaml валиден"
+  else fail "scenario.yaml не проходит проверку (docker compose logs bot)"; fi
+  dc logs --tail 400 bot 2>&1 | grep -q "onboarding scheduler started" && ok "планировщик сценария запущен" || fail "в логах бота нет 'onboarding scheduler started'"
+  [ "$(pg "select 1 from information_schema.columns where table_name='users' and column_name='start_date'")" = "1" ] && ok "миграция 004: users.start_date" || fail "нет users.start_date: применить db/migrations/004_onboarding.sql до пересборки бота"
+  stuck=$(mongo_js "print(db.getCollection('onboarding').countDocuments({steps: {\$elemMatch: {state: 'running', startedAt: {\$lt: new Date(Date.now() - 600000)}}}}))" | tail -1)
+  [ "${stuck:-0}" = "0" ] && ok "нет зависших шагов сценария" || warn "зависших шагов (running > 10 мин): $stuck"
+  errs_ob=$(mongo_js "print(db.getCollection('onboarding').countDocuments({'steps.lastError': {\$exists: true}}))" | tail -1)
+  [ "${errs_ob:-0}" = "0" ] && ok "ошибок доставки шагов нет" || warn "у $errs_ob сотрудников есть шаги с ошибкой доставки (админка -> Онбординг)"
+else
+  echo "  --    бот не запущен, проверка сценария пропущена"
+fi
+
+# ---------------------------------------------------------------------------
 section "Тестовая админка"
 if dc ps --format '{{.Service}}|{{.State}}' 2>/dev/null | grep -q '^admin|running'; then
   AP=$(env_val ADMIN_PORT); AP=${AP:-8080}; AU="http://127.0.0.1:$AP"
