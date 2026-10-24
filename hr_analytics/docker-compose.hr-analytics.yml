@@ -1,0 +1,15 @@
+# Сервис добавляется в корневой docker-compose.yml проекта (блок services:).
+# Пример: docker compose -f docker-compose.yml -f hr_analytics/docker-compose.hr-analytics.yml up -d --build hr-analytics
+services:
+  hr-analytics:
+    build: ./hr_analytics
+    restart: unless-stopped
+    env_file: ./hr_analytics/.env           # SMTP_*, REPORT_*, SCHEDULE_*
+    environment:                            # адреса баз внутри сети compose перекрывают .env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MONGO_URL: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB}
+      MONGO_DB: ${MONGO_DB}
+    depends_on:
+      postgres: {condition: service_healthy}
+      mongo: {condition: service_healthy}
+    networks: [onboarding-net]
