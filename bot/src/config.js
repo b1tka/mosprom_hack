@@ -14,6 +14,10 @@ export const config = {
     secretKey: process.env.S3_SECRET_KEY ?? 'change_me_too',
     bucket: process.env.S3_BUCKET ?? 'onboarding-files',
   },
+  ml: {
+    apiUrl: process.env.ML_API_URL ?? 'http://localhost:8000',
+    timeoutMs: Number(process.env.ML_TIMEOUT_MS ?? 30000),
+  },
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:29092').split(','),
     requestsTopic: process.env.KAFKA_TOPIC_REQUESTS ?? 'ml.requests',

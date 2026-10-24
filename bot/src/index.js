@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { pool, findUserByMaxId } from './db.js';
 import { redis, getState, setState } from './state.js';
 import { registerInvites } from './invite.js';
+import { askRag } from './ml.js';
 import { connectKafka, disconnectKafka, sendToMl, startMlConsumer } from './kafka.js';
 
 const bot = new Bot(config.botToken);
@@ -43,6 +44,18 @@ bot.on('message_created', async (ctx) => {
   const state = await getState(maxId);
   await sendToMl({ maxId, text, role: user.role, tag: user.tag });
   await setState(maxId, { ...state, step: 'waiting_ml' });
+
+  // Любое сообщение нового сотрудника — вопрос к RAG ML-сервиса
+  if (user.role !== 'employee') return ctx.reply('Откройте /menu, чтобы выбрать действие.');
+  let result;
+  try {
+    result = await askRag(text);
+  } catch (err) {
+    console.error('ml api failed', err);
+    return ctx.reply('Сервис ответов временно недоступен, попробуйте позже.');
+  }
+  if (result.code === 200) return ctx.reply(result.answer);
+  return ctx.reply('Не удалось найти ответ на ваш вопрос. Попробуйте переформулировать или обратитесь к HR.');
 });
 
 async function main() {

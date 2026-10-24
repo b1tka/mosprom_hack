@@ -111,6 +111,18 @@ services:
       "
     networks: [onboarding-net]
 
+  ml:
+    build: ./ml
+    restart: unless-stopped
+    ports:
+      - "${ML_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [onboarding-net]
+
   bot:
     build: ./bot
     restart: unless-stopped
@@ -125,7 +137,10 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC_REQUESTS: ${KAFKA_TOPIC_REQUESTS}
       KAFKA_TOPIC_RESPONSES: ${KAFKA_TOPIC_RESPONSES}
+      ML_API_URL: http://ml:8000
     depends_on:
+      ml:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
