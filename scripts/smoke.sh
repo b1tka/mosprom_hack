@@ -102,8 +102,11 @@ w=$(mongo_js "db.getCollection('smoke_probe').insertOne({_id:'p'}).acknowledged;
 # ---------------------------------------------------------------------------
 section "Redis / Kafka / S3"
 [ "$(dc exec -T redis redis-cli ping 2>&1 | tr -d '\r')" = "PONG" ] && ok "redis PONG" || fail "redis не отвечает"
-if dc exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list 2>&1 | grep -qx "$TOPIC"; then ok "топик $TOPIC существует"
-else fail "топика $TOPIC нет (kafka-init не отработал?)"; fi
+TOPIC_ALERTS=$(env_val KAFKA_TOPIC_ALERTS); TOPIC_ALERTS=${TOPIC_ALERTS:-onboarding.alerts}
+topics=$(dc exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list 2>&1)
+for t in "$TOPIC" "$TOPIC_ALERTS"; do
+  echo "$topics" | grep -qx "$t" && ok "топик $t существует" || fail "топика $t нет (docker compose up -d kafka-init)"
+done
 s3code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:$(env_val S3_API_PORT)/minio/health/live" 2>/dev/null)
 [ "$s3code" = "200" ] && ok "s3 live" || warn "s3 health-эндпоинт вернул '${s3code:-нет ответа}' (проверьте вручную, если порт не проброшен)"
 

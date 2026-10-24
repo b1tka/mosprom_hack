@@ -8,11 +8,24 @@ import tempfile
 import unittest
 from unittest import mock
 
+from app import alerts
 from app import kafka_consumer
 from app import mood
 from app import rag
 from app.prompts import NO_INFO_ANSWER, NO_INFO_TAG, NOT_WORK_ANSWER, NOT_WORK_TAG
 from app.store import FileStore
+
+_real_publish = alerts.publish_red_flag
+_patcher = mock.patch.object(alerts, "publish_red_flag", return_value=True)   # тесты не ходят в Kafka
+
+
+def setUpModule():
+    _patcher.start()
+
+
+def tearDownModule():
+    _patcher.stop()
+
 
 CRITICAL = {"mood": "critical", "reason": "absence", "urgent": True, "explanation": "Не дают отпуск."}
 NEUTRAL = {"mood": "neutral", "reason": "work_question", "urgent": False, "explanation": ""}
@@ -167,6 +180,59 @@ class DialogTests(unittest.TestCase):
                 r = kafka_consumer.handle_message({"uid": "u2", "hr_question": "Как дела?", "answer": "Нормально", "stage": None})
             self.assertEqual(r["u2"]["total_requests"], 1)
             self.assertIn("Вопрос HR: Как дела?", cls.call_args.args[0])
+
+
+class AlertTests(unittest.TestCase):
+    def _store(self, d):
+        return FileStore(os.path.join(d, "stats.json"))
+
+    def test_urgent_question_publishes_alert_with_text(self):
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(mood, "get_store", return_value=self._store(d)), \
+             mock.patch.object(mood, "classify_message", return_value=CRITICAL), \
+             mock.patch.object(alerts, "publish_red_flag", return_value=True) as pub:
+            mood.process_message("u1", "нет сил, увольняюсь")
+        pub.assert_called_once()
+        args = pub.call_args.args
+        self.assertEqual(args[:2], ("u1", "bot_question"))
+        self.assertEqual(args[4], "нет сил, увольняюсь")
+
+    def test_not_urgent_no_alert(self):
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(mood, "get_store", return_value=self._store(d)), \
+             mock.patch.object(mood, "classify_message", return_value=NEUTRAL), \
+             mock.patch.object(alerts, "publish_red_flag") as pub:
+            mood.process_message("u1", "как оформить отпуск")
+        pub.assert_not_called()
+
+    def test_ticket_alert_once_even_if_delivered_twice(self):
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(mood, "get_store", return_value=self._store(d)), \
+             mock.patch.object(mood, "classify_dialog", return_value=CRITICAL), \
+             mock.patch.object(alerts, "publish_red_flag", return_value=True) as pub:
+            msg = DialogTests.TICKET
+            kafka_consumer.handle_message(msg)
+            kafka_consumer.handle_message(msg)
+        pub.assert_called_once()
+        self.assertEqual(pub.call_args.args[1], "ticket")
+        self.assertEqual(pub.call_args.args[3], 7)
+
+    def test_publish_failure_does_not_break_stats(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            with mock.patch.object(mood, "get_store", return_value=store), \
+                 mock.patch.object(mood, "classify_message", return_value=CRITICAL), \
+                 mock.patch.object(alerts, "publish_red_flag", _real_publish), \
+                 mock.patch.object(alerts, "_get_producer", side_effect=RuntimeError("kafka down")):
+                r = mood.process_message("u1", "нет сил")
+            self.assertEqual(r["u1"]["total_requests"], 1)
+            self.assertTrue(store.get("u1")["red_flag"])
+
+    def test_alert_payload(self):
+        a = alerts.build_alert("u1", "ticket", CRITICAL, 7, "x" * 500)
+        self.assertEqual((a["type"], a["uid"], a["source"], a["ticket_number"]), ("red_flag", "u1", "ticket", 7))
+        self.assertEqual(len(a["text"]), alerts.MAX_TEXT)
+        self.assertEqual(a["explanation"], "Не дают отпуск.")
 
 
 if __name__ == "__main__":

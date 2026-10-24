@@ -37,6 +37,8 @@ export async function sendTicketDialog(ticket) {
   await producer.send({ topic: answersTopic, messages: [{ key: uid, value: JSON.stringify(payload) }] });
 }
 
+export const newConsumer = (groupId) => kafka.consumer({ groupId });
+
 export async function connectKafka() {
   await producer.connect();
 }

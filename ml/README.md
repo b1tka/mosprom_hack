@@ -85,6 +85,14 @@ LLM meno-lite-0.1 ── сервис ollama (OpenAI-совместимый API)
    (`DIALOG_INTRO` + системный промпт): mood/reason/urgent сотрудника по всей переписке. Тикет без реплик сотрудника пропускается.
    Повторная доставка не удваивает счётчики: ключ `ticket:<uid>:<номер>:<closed_at>` уникален в `events`.
 
+### Kafka `onboarding.alerts` — срочные оценки
+При каждой оценке с `urgent=true` (после записи в Mongo, дубль тикета не повторяет) ML публикует (`app/alerts.py`, ключ `uid`, сбой Kafka на оценку не влияет):
+```json
+{"type": "red_flag", "uid": "<users.id>", "ts": "…", "source": "bot_question|ticket", "ticket_number": 7,
+ "mood": "critical", "reason": "workload", "explanation": "…", "text": "первые 300 символов вопроса боту"}
+```
+`ticket_number` — для источника `ticket`, `text` — для `bot_question`. Читает бот (`bot/src/alerts.js`) и уведомляет HR.
+
 ### Статистика в Mongo (`STORE_BACKEND=mongo`)
 Коллекция `stats` — документ на сотрудника (ключ `uid` = `users.id`, уникальный индекс):
 ```json

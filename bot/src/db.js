@@ -36,6 +36,39 @@ export async function findEmployeeContacts(userId) {
   };
 }
 
+// Сотрудник для уведомления о red_flag: карточка и закреплённый HR (null, если не закреплён или уже не HR)
+export async function findEmployeeForAlert(userId) {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.name, u.surname, u.hr_id, t.name AS tag, d.name AS director_name, d.surname AS director_surname,
+            h.id AS pinned_hr_id, h.max_id AS pinned_hr_max_id
+       FROM users u
+       LEFT JOIN tag t ON t.id = u.tag_id
+       LEFT JOIN users d ON d.id = u.director_id
+       LEFT JOIN (users h JOIN role hr ON hr.id = h.role_id AND hr.name IN ('hr', 'hr_head')) ON h.id = u.hr_id
+      WHERE u.id = $1`,
+    [userId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    surname: r.surname,
+    tag: r.tag,
+    hrId: r.hr_id,
+    director: r.director_name ? `${r.director_name} ${r.director_surname[0]}.` : null,
+    pinnedHr: r.pinned_hr_id ? { id: r.pinned_hr_id, maxId: r.pinned_hr_max_id } : null,
+  };
+}
+
+// Все HR и руководители HR: получатели, если у сотрудника нет закреплённого HR
+export async function listHrRecipients() {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.max_id FROM users u JOIN role r ON r.id = u.role_id WHERE r.name IN ('hr', 'hr_head') ORDER BY u.created_at`,
+  );
+  return rows.map((r) => ({ id: r.id, maxId: r.max_id }));
+}
+
 export async function listTags() {
   const { rows } = await pool.query('SELECT id, name FROM tag ORDER BY name');
   return rows;

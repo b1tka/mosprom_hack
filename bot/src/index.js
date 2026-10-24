@@ -2,6 +2,7 @@ import { Bot } from '@maxhub/max-bot-api';
 import { config } from './config.js';
 import { pool, findUserByMaxId } from './db.js';
 import { redis, setState } from './state.js';
+import { registerAlerts, startAlerts, stopAlerts } from './alerts.js';
 import { registerInvites } from './invite.js';
 import { registerKnowledge } from './knowledge.js';
 import { registerMenu } from './menu.js';
@@ -26,6 +27,7 @@ registerInvites(bot);
 registerKnowledge(bot);
 registerSupport(bot);
 registerMenu(bot);
+registerAlerts(bot);
 
 // Нужен HR, чтобы внести пользователя в таблицу users
 bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id}`));
@@ -75,12 +77,14 @@ async function main() {
   await pool.query('SELECT 1');
   await connectMongo();
   await connectKafka();
+  startAlerts(bot.api);   // не ждём: при сбое Kafka консьюмер сам повторяет подключение
   await bot.start();
   console.log('bot started');
 }
 
 async function shutdown() {
   await bot.stop?.();
+  await stopAlerts();
   await disconnectKafka();
   await disconnectMongo();
   await pool.end();

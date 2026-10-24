@@ -70,6 +70,11 @@ export async function markRead(id, side) {
   await tickets.updateOne({ _id: toId(id) }, { $set: { [side === 'hr' ? 'unreadHr' : 'unreadEmployee']: 0 } });
 }
 
+// Тикет по номеру (для уведомления о red_flag); employeeId — защита от чужого номера
+export async function findByNumber(number, employeeId) {
+  return tickets.findOne({ number: Number(number), 'employee.id': employeeId }, { projection: { _id: 1, number: 1, hrId: 1 } });
+}
+
 // заголовок от LLM приходит позже временного; повторно не перезаписываем
 export async function setTitle(id, { title, category }) {
   await tickets.updateOne({ _id: toId(id), titleSource: 'fallback' }, { $set: { title, category, titleSource: 'llm' } });

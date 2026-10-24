@@ -8,6 +8,7 @@ from typing import Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app import alerts
 from app.llm import get_llm
 from app.prompts import DIALOG_INTRO, FORMAT_SUFFIX, MOODS, REASONS, SYSTEM_PROMPT
 from app.store import get_store
@@ -100,10 +101,12 @@ def get_stats(uid: str) -> Optional[dict]:
 
 
 def _apply(uid: str, classification: dict, stage: Optional[str], old_stats: Optional[dict] = None,
-           source: str = "bot_question", event_key: Optional[str] = None, ticket_number: Optional[int] = None) -> dict:
+           source: str = "bot_question", event_key: Optional[str] = None, ticket_number: Optional[int] = None,
+           text: Optional[str] = None) -> dict:
     """Под блокировкой: пишет событие в историю, берёт старую статистику, обновляет, записывает в хранилище.
 
-    Событие с уже виденным event_key (повторная доставка из Kafka) счётчики не меняет.
+    Событие с уже виденным event_key (повторная доставка из Kafka) счётчики не меняет и алерт не повторяет.
+    Срочная оценка (urgent) после записи уходит алертом в Kafka: бот уведомит закреплённого HR.
     """
     store = get_store()
     with store.lock(uid):
@@ -121,6 +124,8 @@ def _apply(uid: str, classification: dict, stage: Optional[str], old_stats: Opti
         new = update_stats(base, classification, stage)
         new["updated_at"] = now.isoformat()
         store.save(uid, new)
+    if classification["urgent"]:
+        alerts.publish_red_flag(uid, source, classification, ticket_number, text)   # вне блокировки: Kafka может быть медленной
     return new
 
 
@@ -136,7 +141,7 @@ def update_user_stats(uid: str, text: str, old_stats: Optional[dict] = None, sta
     if classification is None:
         log.warning("uid=%s: классификация не удалась, статистика не изменена", uid)
         return
-    _apply(uid, classification, stage, old_stats)
+    _apply(uid, classification, stage, old_stats, text=text)
 
 
 def process_message(uid: str, text: str, stage: Optional[str] = None) -> Optional[dict]:
@@ -144,7 +149,7 @@ def process_message(uid: str, text: str, stage: Optional[str] = None) -> Optiona
     classification = classify_message(text)
     if classification is None:
         return None
-    return {uid: _apply(uid, classification, stage)}
+    return {uid: _apply(uid, classification, stage, text=text)}
 
 
 def process_dialog(uid: str, transcript: str, stage: Optional[str], ticket_number: int, event_key: str) -> Optional[dict]:

@@ -23,7 +23,7 @@ const FALLBACK_TITLE_LEN = 60;
 const LASTQA_TTL_SECONDS = 7 * 24 * 60 * 60;
 const RELAY_TYPES = ['image', 'video', 'audio', 'file'];
 
-const CATEGORY_TITLES = {
+export const CATEGORY_TITLES = {
   technical_issues: 'технические проблемы',
   conflict: 'конфликт',
   workload: 'нагрузка',

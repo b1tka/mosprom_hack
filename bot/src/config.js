@@ -26,5 +26,6 @@ export const config = {
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:29092').split(','),
     answersTopic: process.env.KAFKA_TOPIC_ANSWERS ?? 'onboarding.answers',
+    alertsTopic: process.env.KAFKA_TOPIC_ALERTS ?? 'onboarding.alerts',
   },
 };

@@ -127,7 +127,8 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_TOPIC_ANSWERS} --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_TOPIC_ANSWERS} --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_TOPIC_ALERTS:-onboarding.alerts} --partitions 3 --replication-factor 1
       "
     networks: [onboarding-net]
 
@@ -175,6 +176,7 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       KAFKA_BOOTSTRAP: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC_ANSWERS}
+      KAFKA_TOPIC_ALERTS: ${KAFKA_TOPIC_ALERTS:-onboarding.alerts}
       MONGO_URL: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB}
       # протокол Xet у huggingface_hub зависал на медленной сети; обычный HTTP скачивает стабильно
       HF_HUB_DISABLE_XET: "1"
@@ -257,6 +259,7 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC_ANSWERS: ${KAFKA_TOPIC_ANSWERS}
+      KAFKA_TOPIC_ALERTS: ${KAFKA_TOPIC_ALERTS:-onboarding.alerts}
       ML_API_URL: http://ml:8000
       ML_TIMEOUT_MS: 90000
       MONGO_URL: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB}

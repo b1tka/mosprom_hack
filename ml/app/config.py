@@ -45,3 +45,4 @@ S3_INCOMING_PREFIX = os.getenv("S3_INCOMING_PREFIX", "incoming/")  # файлы 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "onboarding.answers")
 KAFKA_GROUP = os.getenv("KAFKA_GROUP", "corsik-mood")
+KAFKA_TOPIC_ALERTS = os.getenv("KAFKA_TOPIC_ALERTS", "onboarding.alerts")  # срочные оценки -> бот -> HR
