@@ -39,6 +39,14 @@ mongo_js() {
   dc exec -T mongo mongosh --quiet -u "$MONGO_USER" -p "$MONGO_PASS" --authenticationDatabase "$MONGO_DB" "$MONGO_DB" --eval "$1" 2>&1
 }
 
+# без доступа к docker.sock все проверки ниже дали бы ложные FAIL
+if ! docker info >/dev/null 2>&1; then
+  echo "Нет доступа к Docker: $(docker info 2>&1 | grep -m1 -i 'permission denied\|cannot connect' | cut -c1-120)"
+  echo "Запустите через sudo:  sudo ./scripts/smoke.sh"
+  echo "или добавьте себя в группу:  sudo usermod -aG docker \$USER  (затем перелогиниться)"
+  exit 2
+fi
+
 cleanup() {
   [ "$KEEP" = 1 ] && return
   mongo_js "db.getCollection('stats').deleteMany({uid:'$UID_T'}); db.getCollection('events').deleteMany({uid:'$UID_T'}); db.getCollection('locks').deleteMany({_id:'stats:$UID_T'})" >/dev/null
@@ -101,7 +109,13 @@ s3code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 5 "http
 
 # ---------------------------------------------------------------------------
 section "ML: API"
-h=$(curl_ml "$ML/health" 2>&1)
+# ml при старте грузит эмбеддинги (до нескольких минут): порт уже проброшен, а ответа ещё нет
+for i in $(seq 1 24); do
+  h=$(curl_ml "$ML/health" 2>&1)
+  echo "$h" | grep -q '"ok"' && break
+  [ "$i" = 1 ] && echo "  ждём готовности ml (до 2 минут)…"
+  sleep 5
+done
 echo "$h" | grep -q '"ok"' && ok "GET /health" || fail "GET /health: $h"
 docs=$(curl_ml "$ML/v1/documents" 2>&1)
 n=$(echo "$docs" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["documents"]))' 2>/dev/null)
