@@ -22,7 +22,7 @@ services:
 
   # MongoDB: обращения сотрудников к HR (коллекции tickets, counters), пишет бот
   mongo:
-    image: mongo:8.0.34
+    image: mongo:7.0.41
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}

@@ -11,7 +11,7 @@
 
 ## Стек
 - Postgres 16 — `users` (`hr_id` — закреплённый HR), `role`, `tag`, `invites` (`db/init/*.sql` выполняются только при первом старте тома; для живой БД — `db/migrations/`, вручную).
-- MongoDB 8 (на хосте порт 27018; 27017 занят локальным MongoDB) — обращения сотрудников к HR: коллекции `tickets` (тикет с перепиской) и `counters` (номер тикета), пишет бот. Пользователь приложения с `readWrite` на базу `onboarding` (`db/mongo-init/`), сервисам передаётся `MONGO_URL`.
+- MongoDB 7.0 (`mongo:7.0.41`; 8.x не использовать: на ядре Linux 6.19–7.0.13 `mongod` 8.0.28+ не стартует, у 7.0 другой TCMalloc, проверки нет) (на хосте порт 27018; 27017 занят локальным MongoDB) — обращения сотрудников к HR: коллекции `tickets` (тикет с перепиской) и `counters` (номер тикета), пишет бот. Пользователь приложения с `readWrite` на базу `onboarding` (`db/mongo-init/`), сервисам передаётся `MONGO_URL`.
 - Redis 7 (на хосте порт 6380) — состояние диалогов бота (`dialog:<max_id>`), переживает рестарт.
 - S3 — OpenMaxIO (форк консоли MinIO), образ `ghcr.io/snazy/maxio-release` (неофициальный; MinIO на Quay/Docker Hub не скачался). Бакет `onboarding-files`.
 - Kafka (KRaft, 1 нода) — топик `onboarding.answers`: ответы сотрудников на вопросы HR `{uid, hr_question, answer, stage}` -> `ml-mood-consumer` -> настроение. Бот: `sendHrAnswer` (опросы HR ещё не сделаны).

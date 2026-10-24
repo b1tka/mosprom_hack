@@ -34,6 +34,9 @@ docker compose ps -a
    Дальше документы добавляет HR через бота.
 5. **Диагностика:** «Сервис ответов временно недоступен» у сотрудника = ML ответил ошибкой; причина — в `docker compose logs ml`
    (`Ошибка RAG` + traceback: пустая база, нет `ollama`, модель не скачана, таймаут). Ход индексации — `docker compose logs -f ml`.
+6. **MongoDB только 7.0.** `mongod` 8.0.28+ / 8.3 не стартует на ядре Linux 6.19–7.0.13 (`MongoDB cannot start: ... known incompatibility`, SERVER-121912):
+   в 8.x вшит Google TCMalloc (rseq), в 7.0 — gperftools, проверки нет. Не менять образ на `mongo:8`/`latest`. Том от 8.0 версия 7.0 не откроет:
+   `docker compose down mongo && docker volume rm <проект>_mongo_data` (данных там пока нет), затем `docker compose up -d mongo`.
 
 ## Файлы
 
@@ -53,7 +56,7 @@ docker compose ps -a
 | Сервис | Образ | Порты (хост) | Том | Назначение |
 |--------|-------|--------------|-----|-----------|
 | `postgres` | `postgres:16` | 5432 | `pg_data` | основная БД |
-| `mongo` | `mongo:8.0.34` | 27018 (в контейнере 27017) | `mongo_data` | MongoDB: обращения сотрудников к HR (тикеты) |
+| `mongo` | `mongo:7.0.41` | 27018 (в контейнере 27017) | `mongo_data` | MongoDB: обращения сотрудников к HR (тикеты) |
 | `redis` | `redis:7-alpine` | 6380 (в контейнере 6379) | `redis_data` | состояние диалогов (`appendonly yes`) |
 | `s3` | `ghcr.io/snazy/maxio-release:latest` | 9000 (API), 9001 (консоль) | `s3_data` | файлы |
 | `s3-init` | тот же | — | — | одноразово создаёт бакет `S3_BUCKET` |
