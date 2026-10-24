@@ -24,8 +24,11 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))
 OCR_MIN_CHARS = int(os.getenv("OCR_MIN_CHARS", "50"))  # меньше символов на странице -> считаем сканом
 
-# --- Хранилище статистики: "file" (для тестов, без Redis) или "redis" ---
+# --- Хранилище статистики: "file" (для тестов), "redis" или "mongo" (продакшен: читает hr_analytics) ---
 STORE_BACKEND = os.getenv("STORE_BACKEND", "file")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27018/onboarding")  # база берётся из пути URL
+MONGO_STATS_COLLECTION = os.getenv("MONGO_STATS_COLLECTION", "stats")      # сводка на сотрудника
+MONGO_EVENTS_COLLECTION = os.getenv("MONGO_EVENTS_COLLECTION", "events")   # история оценок (для динамики)
 STATS_FILE = os.getenv("STATS_FILE", str(BASE_DIR / "stats_store.json"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "onboarding:stats:")

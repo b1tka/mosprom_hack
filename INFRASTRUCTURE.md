@@ -37,6 +37,10 @@ docker compose ps -a
 6. **MongoDB только 7.0.** `mongod` 8.0.28+ / 8.3 не стартует на ядре Linux 6.19–7.0.13 (`MongoDB cannot start: ... known incompatibility`, SERVER-121912):
    в 8.x вшит Google TCMalloc (rseq), в 7.0 — gperftools, проверки нет. Не менять образ на `mongo:8`/`latest`. Том от 8.0 версия 7.0 не откроет:
    `docker compose down mongo && docker volume rm <проект>_mongo_data` (данных там пока нет), затем `docker compose up -d mongo`.
+7. **Смоук после деплоя:** `./scripts/smoke.sh` (из корня проекта; `--no-llm` — без проверок модели, `--keep` — не удалять тестовые данные).
+   Проверяет контейнеры, схему Postgres (миграции), версию Mongo, Redis/Kafka/S3, ML API, а с LLM — `/v1/ask`, `/v1/ticket-title`,
+   запись оценки в `stats`/`events` и путь «диалог тикета -> Kafka -> консьюмер -> events»; затем логи бота и `hr-analytics check`.
+   FAIL — стек неисправен (код выхода 1), WARN — на что обратить внимание (SMTP не настроен, пустая база знаний, LLM оценила мягче). Тестовый uid `00000000-0000-4000-8000-0000000005a0`, его записи в Mongo удаляются.
 
 ## Файлы
 
@@ -65,7 +69,8 @@ docker compose ps -a
 | `ollama` | `ollama/ollama:0.40.10` | — | `ollama_data` | LLM meno-lite-0.1, OpenAI-совместимый API; **профиль `llm`** |
 | `ollama-init` | тот же | — | — | одноразово скачивает модель `MENO_MODEL`; профиль `llm` |
 | `ml` | сборка из `./ml` (Python 3.12, FastAPI, torch CPU) | 8000 | `ml_data`, `hf_cache` | ML API: RAG (`/v1/ask`) + фоновая оценка настроения |
-| `ml-mood-consumer` | тот же образ | — | — | Kafka-консьюмер `onboarding.answers` -> настроение -> Redis |
+| `ml-mood-consumer` | тот же образ | — | — | Kafka-консьюмер `onboarding.answers` -> настроение -> Mongo |
+| `hr-analytics` | сборка из `./hr_analytics` (профиль `reports`) | — | — | отчёты по ролям на почту (Яндекс SMTP): Mongo `stats`/`events` + Postgres |
 | `bot` | сборка из `./bot` (Node 22) | — | — | бот MAX, подключён ко всем сервисам выше |
 
 Адреса внутри сети compose: `postgres:5432`, `mongo:27017`, `redis:6379`, `s3:9000`, `kafka:9092`, `ml:8000`, `ollama:11434`.
@@ -96,8 +101,8 @@ Docker Hub не скачались (401 / access denied), поэтому исп�
 дальнейшая ML-разработка — в `ml/` от `main`. Подробно: `ml/README.md`.
 
 - **RAG**: вопрос -> поиск в Chroma (эмбеддинги `intfloat/multilingual-e5-large`, top-3 чанка) -> LLM meno-lite-0.1 (через Ollama) -> `(код, ответ)`.
-- **Настроение**: классификация mood / reason / urgent той же LLM; статистика в Redis `onboarding:stats:<users.id>`.
-  Источники: каждый вопрос из `/v1/ask` (в фоне, после ответа) и ответы на вопросы HR из Kafka `onboarding.answers`.
+- **Настроение**: классификация mood / reason / urgent той же LLM; статистика в Mongo (`stats` — сводка на сотрудника, `events` — история оценок).
+  Источники: каждый вопрос из `/v1/ask` (в фоне, после ответа), ответы на вопросы HR и **полные диалоги закрытых тикетов** из Kafka `onboarding.answers` (один вердикт на диалог).
 - **База знаний**: исходные документы в S3 `onboarding-files/knowledge/`, векторная база Chroma и `knowledge_base.json` — в томе `ml_data`,
   кэш моделей HuggingFace — в томе `hf_cache`. Полная переиндексация вручную: `docker compose run --rm ml python -m app.ingest build --from-s3`.
   Отдельный документ HR добавляет через бота (`/menu` -> «Добавить файл в базу знаний», см. раздел «Бот»).
@@ -138,10 +143,17 @@ Docker Hub не скачались (401 / access denied), поэтому исп�
 пока не реализованы), читает `ml-mood-consumer`. Старые топики `ml.requests` / `ml.responses` больше не используются
 (в уже созданном брокере остались, на работу не влияют).
 
-### Известная проблема: формат статистики
-`mood` (ML) и ветка `hr_analytics` (отчёты HR, в `main` не влита) используют один ключ Redis `onboarding:stats:<users.id>`,
-но разный JSON: ML пишет `total_requests`, `moods`, `reasons`, `last_reason`; hr_analytics ждёт `request_count`, `mood`,
-`request_tags`, `reason`. Перед подключением отчётов форматы нужно согласовать.
+### Настроение и отчёты
+ML пишет статистику в Mongo (`STORE_BACKEND=mongo`): `stats` (сводка на сотрудника) и `events` (история), формат — в `ml/README.md`.
+`hr_analytics/` (из ветки `mood_find`) читает эти коллекции и `users`/`role`/`tag` из Postgres и шлёт отчёты: `hr` — каждый будний день в 09:00,
+`director` и `hr_head` — по понедельникам (cron в `SCHEDULE_*`). Письма уходят на `users.email`; у HR, директоров и `hr_head` он пуст,
+пока не проставлен вручную (`UPDATE users SET email = '…' WHERE max_id = …`), иначе отчёт пропускается с предупреждением в логе.
+
+Включение (сервис в профиле `reports`, сам не стартует):
+1. В `.env`: `SMTP_USER`, `SMTP_PASSWORD` (пароль приложения Яндекса, не пароль аккаунта), `REPORT_RECIPIENT_OVERRIDE=<свой адрес>` — все письма идут туда с пометкой `[TEST]`.
+2. Проверка: `docker compose --profile reports run --rm hr-analytics python -m app check`, затем `... python -m app preview` (HTML+PDF в контейнере, без отправки) и `... python -m app send --role hr`.
+3. `docker compose --profile reports up -d --build hr-analytics`. Когда отчёты проверены — очистить `REPORT_RECIPIENT_OVERRIDE` и пересоздать сервис: письма пойдут реальным получателям.
+Старые ключи Redis `onboarding:stats:*` не используются и не переносились.
 
 ## База данных
 
@@ -325,14 +337,12 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 - удаление файла HR-ом через кнопки (на моках проверено, в MAX — нет);
 - единичный сбой загрузки картинки (`upload.request.error`, «Network error») воспроизвести не удалось.
 
-Также: сохранность ключа Redis после рестарта контейнера `redis`; отправка `sendHrAnswer` из бота (опросов HR пока нет).
+Также: оценка диалога тикета настоящей LLM (на моках подменялась); реальная отправка отчётов через SMTP (проверялись `check` и `preview`); `sendHrAnswer` из бота (опросов HR пока нет).
 
 ## Отложено / бэклог
 
-- Тикеты: переписку сотрудника с HR отправлять в Kafka `onboarding.answers` (`sendHrAnswer` уже есть) для анализа настроения;
-  проставить `users.hr_id` сотрудникам, заведённым до миграции `003` (из `invites.created_by`); оценка 1–5 после закрытия.
+- Тикеты: проставить `users.hr_id` сотрудникам, заведённым до миграции `003` (из `invites.created_by`); оценка 1–5 после закрытия.
 - `ENV PYTHONUNBUFFERED=1` в `ml/Dockerfile`: сейчас `print` из `ingest.py` (ход индексации) появляется в логах `ml` с задержкой, `logging` — сразу.
-- Согласовать формат статистики настроения с веткой `hr_analytics` (см. «Известная проблема»).
 - Соавторство в коммите `a3e4ecb`: указан только Trixxy; основную часть `mood_find` писал veskel0-0 (почты нет) — не исправлялось.
 
 Примечание для локальной проверки: если в shell задан `http_proxy`, запросы `curl localhost:8000` уходят в прокси и получают от него 503 —

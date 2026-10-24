@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from app import kafka_consumer
 from app import mood
 from app import rag
 from app.prompts import NO_INFO_ANSWER, NO_INFO_TAG, NOT_WORK_ANSWER, NOT_WORK_TAG
@@ -103,6 +104,69 @@ class RagTests(unittest.TestCase):
         with mock.patch.object(rag, "_generate") as gen:
             self.assertEqual(rag.ask_rag("   "), (200, NOT_WORK_ANSWER))
             gen.assert_not_called()
+
+
+class DialogTests(unittest.TestCase):
+    TICKET = {
+        "type": "ticket", "uid": "u1", "ticket_number": 7, "closed_at": "2026-10-24T12:00:00Z", "stage": None,
+        "messages": [
+            {"from": "employee", "text": "Не дают пропуск", "attachments": 0},
+            {"from": "bot", "text": "Передаю HR", "attachments": 0},
+            {"from": "hr", "text": "Оформили", "attachments": 0},
+            {"from": "employee", "text": "", "attachments": 1},
+        ],
+    }
+
+    def test_transcript(self):
+        t = kafka_consumer.build_transcript(self.TICKET["messages"])
+        self.assertEqual(t.splitlines(), [
+            "Сотрудник: Не дают пропуск", "Бот: Передаю HR", "HR: Оформили", "Сотрудник: [вложений: 1]"])
+
+    def test_transcript_drops_oldest_when_too_long(self):
+        msgs = [{"from": "employee", "text": f"{i} " + "x" * 5000} for i in range(5)]
+        t = kafka_consumer.build_transcript(msgs)
+        self.assertLessEqual(len(t), kafka_consumer.MAX_DIALOG_CHARS)
+        self.assertIn("4 xxx", t)
+        self.assertNotIn("0 xxx", t)
+
+    def test_ticket_one_verdict_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = FileStore(os.path.join(d, "stats.json"))
+            with mock.patch.object(mood, "get_store", return_value=store), \
+                 mock.patch.object(mood, "classify_dialog", return_value=NEUTRAL) as cls:
+                r1 = kafka_consumer.handle_message(self.TICKET)
+                r2 = kafka_consumer.handle_message(self.TICKET)             # повторная доставка
+                reopened = {**self.TICKET, "closed_at": "2026-10-25T09:00:00Z"}
+                r3 = kafka_consumer.handle_message(reopened)               # закрыт заново
+            self.assertEqual(r1["u1"]["total_requests"], 1)
+            self.assertEqual(r2["u1"]["total_requests"], 1)                # не удвоилось
+            self.assertEqual(r3["u1"]["total_requests"], 2)
+            self.assertEqual(store.get("u1")["total_requests"], 2)
+            self.assertIn("updated_at", store.get("u1"))
+            self.assertIn("Сотрудник: Не дают пропуск", cls.call_args_list[0].args[0])
+
+    def test_ticket_without_employee_text_skipped(self):
+        msg = {**self.TICKET, "messages": [{"from": "hr", "text": "Здравствуйте"}]}
+        with mock.patch.object(mood, "classify_dialog") as cls:
+            self.assertIsNone(kafka_consumer.handle_message(msg))
+            cls.assert_not_called()
+
+    def test_ticket_classification_failure_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = FileStore(os.path.join(d, "stats.json"))
+            with mock.patch.object(mood, "get_store", return_value=store), \
+                 mock.patch.object(mood, "classify_dialog", return_value=None):
+                self.assertIsNone(kafka_consumer.handle_message(self.TICKET))
+            self.assertIsNone(store.get("u1"))
+
+    def test_old_hr_answer_format_still_works(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = FileStore(os.path.join(d, "stats.json"))
+            with mock.patch.object(mood, "get_store", return_value=store), \
+                 mock.patch.object(mood, "classify_message", return_value=NEUTRAL) as cls:
+                r = kafka_consumer.handle_message({"uid": "u2", "hr_question": "Как дела?", "answer": "Нормально", "stage": None})
+            self.assertEqual(r["u2"]["total_requests"], 1)
+            self.assertIn("Вопрос HR: Как дела?", cls.call_args.args[0])
 
 
 if __name__ == "__main__":

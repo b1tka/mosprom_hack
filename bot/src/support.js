@@ -3,6 +3,7 @@ import { Keyboard } from '@maxhub/max-bot-api';
 import { findEmployeeContacts, findUserByMaxId } from './db.js';
 import { isHr } from './invite.js';
 import { ticketTitle } from './ml.js';
+import { sendTicketDialog } from './kafka.js';
 import { getState, redis, setState } from './state.js';
 import { show } from './ui.js';
 import {
@@ -44,6 +45,10 @@ const kb = (rows) => Keyboard.inlineKeyboard(rows);
 const btn = (text, payload) => Keyboard.button.callback(text, payload);
 const idOf = (t) => String(t._id);
 const idle = { step: 'idle', data: {} };
+
+// Диалог закрытого тикета уходит на оценку настроения; сбой Kafka закрытию не мешает и ответа не ждёт
+const publishDialog = (ticket) => sendTicketDialog(ticket)
+  .catch((err) => console.error('ticket dialog to kafka failed', ticket.number, err));
 
 // hr видит тикеты своих сотрудников, hr_head — все
 export const hrScope = (hr) => (hr.role === 'hr_head' ? {} : { hrId: hr.id });
@@ -427,6 +432,7 @@ export function registerSupport(bot) {
     if (!ticket) return null;
     const closed = await closeTicket(ticket._id, 'employee');
     if (!closed) return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
+    publishDialog(closed);
     const maxId = ctx.user.user_id;
     const state = await getState(maxId);
     if (state.step === 'ticket_chat' && state.data.ticketId === idOf(ticket)) await setState(maxId, idle);
@@ -496,6 +502,7 @@ export function registerSupport(bot) {
     if (!ticket) return null;
     const closed = await closeTicket(ticket._id, 'hr');
     if (!closed) return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
+    publishDialog(closed);
     await setState(ctx.user.user_id, idle);
     const empState = await getState(ticket.employee.maxId);
     if (empState.step === 'ticket_chat' && empState.data.ticketId === idOf(ticket)) await setState(ticket.employee.maxId, idle);

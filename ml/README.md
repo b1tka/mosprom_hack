@@ -8,8 +8,10 @@ RAG-ответы на вопросы новых сотрудников и оце
 ```
 бот ──HTTP POST /v1/ask──► ml (FastAPI, app/api.py)
                              ├─ rag.py:   вопрос → поиск в Chroma (эмбеддинги e5-large) → LLM → (код, ответ)
-                             └─ фоном mood.py: классификация вопроса → статистика в Redis
-бот ──Kafka onboarding.answers──► ml-mood-consumer (app/kafka_consumer.py) → mood.py → статистика в Redis
+                             └─ фоном mood.py: классификация вопроса → статистика в Mongo (stats + events)
+бот ──Kafka onboarding.answers──► ml-mood-consumer (app/kafka_consumer.py) → mood.py → статистика в Mongo
+  (ответы на вопросы HR и полные диалоги закрытых тикетов)
+hr-analytics (hr_analytics/) читает Mongo stats/events → отчёты по ролям на почту
 LLM meno-lite-0.1 ── сервис ollama (OpenAI-совместимый API), профиль compose `llm`
 Документы базы знаний ── S3 `onboarding-files/knowledge/` → ingest.py → Chroma (том ml_data)
 ```
@@ -26,7 +28,7 @@ LLM meno-lite-0.1 ── сервис ollama (OpenAI-совместимый API)
 | `app/ingest.py` | документы → текст (OCR для сканов) → чанки → JSON + Chroma; загрузка в S3 |
 | `app/s3_docs.py` | работа с документами в S3 |
 | `app/vectorstore.py`, `app/llm.py`, `app/store.py`, `app/prompts.py`, `app/config.py` | векторная база, клиент LLM, хранилище статистики, промпты, настройки (всё через env) |
-| `tests/test_offline.py` | тесты логики без LLM, Chroma, Redis, Kafka |
+| `tests/test_offline.py` | тесты логики без LLM, Chroma, Mongo, Kafka |
 | `demo.py` | ручная отладка из консоли |
 
 ## Контракт
@@ -41,7 +43,7 @@ LLM meno-lite-0.1 ── сервис ollama (OpenAI-совместимый API)
 Другие статусы: `503` — LLM или векторная база недоступны (в т.ч. база не проиндексирована), `422` — невалидный запрос.
 Бот пересылает пользователю `answer` при 200 и 400, при прочих — «сервис временно недоступен».
 
-После ответа в фоне классифицируется вопрос и обновляется статистика `onboarding:stats:<user_id>` в Redis.
+После ответа в фоне классифицируется вопрос и обновляется статистика пользователя в Mongo (`stats` + запись в `events`).
 
 ### `POST /v1/documents` — добавить документ из S3 (вызывает бот, когда HR присылает файл)
 Запрос: `{"key": "incoming/<id>/<имя.pdf|.txt|.md>"}` — бот кладёт файл в S3 под префикс `S3_INCOMING_PREFIX` (`incoming/`).
@@ -69,19 +71,34 @@ LLM meno-lite-0.1 ── сервис ollama (OpenAI-совместимый API)
 ### `GET /health` → `{"status": "ok"}`
 
 ### Kafka `onboarding.answers`
-`{"uid": "<users.id>", "hr_question": "<строка или пусто>", "answer": "<ответ сотрудника>", "stage": null}`.
-Ключ сообщения — `uid`. Бот отправляет такие сообщения через `sendHrAnswer` (`bot/src/kafka.js`);
-сами опросы HR в боте пока не реализованы.
+Ключ сообщения — `uid`. Два вида:
 
-### Статистика в Redis (`onboarding:stats:<users.id>`)
+1. Ответ сотрудника на вопрос HR: `{"uid": "<users.id>", "hr_question": "<строка или пусто>", "answer": "<ответ сотрудника>", "stage": null}`.
+   Бот отправляет через `sendHrAnswer` (`bot/src/kafka.js`); сами опросы HR в боте пока не реализованы. Одна реплика — одна оценка.
+2. Диалог закрытого тикета (бот: `sendTicketDialog`, при закрытии HR или сотрудником; после переоткрытия и нового закрытия — заново):
+   ```json
+   {"type": "ticket", "uid": "<users.id>", "ticket_number": 7, "closed_at": "2026-10-24T12:00:00.000Z", "closed_by": "hr",
+    "stage": null, "title": "…", "category": null,
+    "messages": [{"from": "employee|bot|hr", "text": "…", "at": "…", "attachments": 0}]}
+   ```
+   Консьюмер собирает транскрипт «Сотрудник: … / Бот: … / HR: …» (последние 12 000 символов), LLM даёт **один вердикт на диалог**
+   (`DIALOG_INTRO` + системный промпт): mood/reason/urgent сотрудника по всей переписке. Тикет без реплик сотрудника пропускается.
+   Повторная доставка не удваивает счётчики: ключ `ticket:<uid>:<номер>:<closed_at>` уникален в `events`.
+
+### Статистика в Mongo (`STORE_BACKEND=mongo`)
+Коллекция `stats` — документ на сотрудника (ключ `uid` = `users.id`, уникальный индекс):
 ```json
 {"stage": null, "total_requests": 3,
  "moods": {"positive": 0, "neutral": 2, "negative": 1, "critical": 0},
  "reasons": {"technical_issues": 1, "conflict": 0, "workload": 0, "work_question": 2, "gratitude": 0, "absence": 0, "finance": 0, "documents": 0},
  "red_flag": false, "last_reason": ""}
 ```
-Внимание: ветка `hr_analytics` читает тот же ключ, но ждёт другой формат (`request_count`, `mood`, `request_tags`, `reason`).
-Перед подключением отчётов форматы нужно согласовать.
+К документу добавляются `uid` и `updated_at` (ISO, UTC). `red_flag` ставит `urgent`, сбрасывает его только HR (вручную).
+
+Коллекция `events` — история оценок для графиков динамики:
+`{uid, ts, mood, reason, urgent, source: "bot_question"|"ticket", ticket_number?, event_key?}`; индексы `(uid, ts)` и уникальный разреженный `event_key`.
+Коллекция `locks` — блокировка на пользователя (TTL 30 с), чтобы API и консьюмер не затирали счётчики друг друга.
+Бэкенды хранилища: `mongo` (прод, в compose), `redis` (только сводка, без истории), `file` (тесты). Читает `stats`/`events` сервис `hr_analytics/`.
 
 ## База знаний
 

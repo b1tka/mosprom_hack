@@ -16,6 +16,27 @@ export async function sendHrAnswer({ uid, hrQuestion, answer, stage = null }) {
   });
 }
 
+// Полный диалог закрытого тикета -> ML: один вердикт о настроении сотрудника на весь диалог.
+// Тот же топик, что и ответы на вопросы HR; отличается полем type. Вложения не передаём, только их число.
+// Повторное закрытие переоткрытого тикета шлёт диалог заново (closed_at другой), ML защищён от дублей по ключу тикет+closed_at.
+export async function sendTicketDialog(ticket) {
+  const uid = String(ticket.employee.id);
+  const payload = {
+    type: 'ticket',
+    uid,
+    ticket_number: ticket.number,
+    closed_at: ticket.closedAt.toISOString(),
+    closed_by: ticket.closedBy,
+    stage: null,
+    title: ticket.title,
+    category: ticket.category,
+    messages: ticket.messages.map((m) => ({
+      from: m.from, text: m.text ?? '', at: m.at, attachments: (m.attachments ?? []).length,
+    })),
+  };
+  await producer.send({ topic: answersTopic, messages: [{ key: uid, value: JSON.stringify(payload) }] });
+}
+
 export async function connectKafka() {
   await producer.connect();
 }

@@ -167,7 +167,7 @@ services:
       MENO_MODEL: ${MENO_MODEL}
       CHROMA_DIR: /data/chroma
       KB_PATH: /data/knowledge_base.json
-      STORE_BACKEND: redis
+      STORE_BACKEND: mongo   # stats + events; их читает hr-analytics
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://s3:9000
       S3_ACCESS_KEY: ${S3_ROOT_USER}
@@ -186,6 +186,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
       s3-init:
         condition: service_completed_successfully
     healthcheck:
@@ -196,7 +198,7 @@ services:
       start_period: 600s  # первый старт скачивает модель эмбеддингов (~2.2 ГБ)
     networks: [onboarding-net]
 
-  # Kafka-консьюмер: ответы сотрудников на вопросы HR -> классификация настроения -> статистика в Redis
+  # Kafka-консьюмер: ответы на вопросы HR и диалоги закрытых тикетов -> классификация настроения -> статистика в Mongo
   ml-mood-consumer:
     build: ./ml
     restart: unless-stopped
@@ -205,8 +207,41 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    networks: [onboarding-net]
+
+  # Отчёты по онбордингу на почту (Яндекс SMTP): статистика настроения из Mongo (stats, events) + люди из Postgres.
+  # Профиль reports: рассылка стартует только по явной команде, когда в .env заданы SMTP_* и REPORT_RECIPIENT_OVERRIDE
+  #   docker compose --profile reports up -d --build hr-analytics
+  hr-analytics:
+    build: ./hr_analytics
+    profiles: [reports]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MONGO_URL: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB}
+      MONGO_DB: ${MONGO_DB}
+      MONGO_STATS_COLLECTION: stats
+      MONGO_EVENTS_COLLECTION: events
+      SMTP_HOST: ${SMTP_HOST:-smtp.yandex.ru}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURITY: ${SMTP_SECURITY:-ssl}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Корсик · Онбординг}
+      REPORT_RECIPIENT_OVERRIDE: ${REPORT_RECIPIENT_OVERRIDE:-}
+      REPORT_TZ: ${REPORT_TZ:-Europe/Moscow}
+      SCHEDULE_HR: ${SCHEDULE_HR:-0 9 * * 1-5}
+      SCHEDULE_DIRECTOR: ${SCHEDULE_DIRECTOR:-0 9 * * 1}
+      SCHEDULE_HR_HEAD: ${SCHEDULE_HR_HEAD:-0 9 * * 1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
     networks: [onboarding-net]
 
   bot:
