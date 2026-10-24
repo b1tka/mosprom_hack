@@ -208,5 +208,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "Тестовая админка"
+if dc ps --format '{{.Service}}|{{.State}}' 2>/dev/null | grep -q '^admin|running'; then
+  AP=$(env_val ADMIN_PORT); AP=${AP:-8080}; AU="http://127.0.0.1:$AP"
+  bind=$(dc port admin 8080 2>/dev/null | head -1)
+  case "$bind" in 127.0.0.1:*) ok "порт админки только на loopback ($bind)" ;; *) fail "порт админки слушает не loopback: '${bind:-?}' (должно быть 127.0.0.1)" ;; esac
+  [ "$(env_val ADMIN_ACCESS)" = "anyone" ] && warn "ADMIN_ACCESS=anyone: /admin выдаёт доступ любому пользователю бота (полный доступ к базам); после тестов выключить"
+  code_t="SMOKE$(date +%s | tail -c 4)A"
+  smoke_id=$(pg "select u.max_id from users u join role r on r.id=u.role_id where r.name in ('hr','hr_head') order by u.created_at limit 1")   # реальный HR: подходит и для ADMIN_ACCESS=hr
+  dc exec -T redis redis-cli SET "admin:code:$code_t" "{\"maxId\":\"${smoke_id:-0}\",\"name\":\"smoke-check\",\"role\":null}" EX 120 >/dev/null
+  jar=$(mktemp)
+  lc=$(curl --noproxy '*' -s -c "$jar" -o /dev/null -w '%{http_code}' --max-time 10 "$AU/auth?code=$code_t")
+  if [ "$lc" = "303" ]; then
+    ok "вход по коду"
+    for p in / /employees /tickets /kb /db /db/pg /db/pg/sql /db/mongo /db/redis /db/kafka /db/s3; do
+      pc=$(curl --noproxy '*' -s -b "$jar" -o /dev/null -w '%{http_code}' --max-time 30 "$AU$p")
+      [ "$pc" = "200" ] && ok "GET $p" || fail "GET $p -> $pc"
+    done
+  else
+    fail "вход по коду -> HTTP $lc (ADMIN_ACCESS=off, SESSION_SECRET не задан или контейнер перезапускается?)"
+  fi
+  sid=$(awk '$6=="admin_sid"{print $7}' "$jar")    # удаляем только свою сессию, чужие не трогаем
+  [ -n "$sid" ] && dc exec -T redis redis-cli DEL "admin:sess:$sid" >/dev/null
+  mongo_js "db.getCollection('admin_audit').deleteMany({name:'smoke-check'})" >/dev/null
+else
+  echo "  --    админка не запущена (профиль admin; запускается вручную)"
+fi
+
+# ---------------------------------------------------------------------------
 printf '\nИтого: OK %s, WARN %s, FAIL %s\n' "$PASS" "$WARNS" "$FAILS"
 [ "$FAILS" = 0 ]

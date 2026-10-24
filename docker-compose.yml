@@ -258,6 +258,10 @@ services:
       S3_SECRET_KEY: ${S3_ROOT_PASSWORD}
       S3_BUCKET: ${S3_BUCKET}
       KAFKA_BROKERS: kafka:9092
+      # тестовая админка (профиль admin): /admin в боте и внутренний HTTP для действий над тикетами
+      ADMIN_ACCESS: ${ADMIN_ACCESS:-off}
+      ADMIN_URL: ${ADMIN_URL:-http://localhost:8080}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       KAFKA_TOPIC_ANSWERS: ${KAFKA_TOPIC_ANSWERS}
       KAFKA_TOPIC_ALERTS: ${KAFKA_TOPIC_ALERTS:-onboarding.alerts}
       ML_API_URL: http://ml:8000
@@ -275,6 +279,42 @@ services:
         condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
+    networks: [onboarding-net]
+
+  # Тестовая админка: обзор, сотрудники, тикеты, база знаний, управление базами. ТОЛЬКО для тестирования: показывает ПДн и переписку.
+  # Профиль admin; порт публикуется строго на 127.0.0.1 (доступ через SSH-туннель: ssh -L 8080:localhost:8080 <vps>).
+  # Вход: бот, команда /admin (режим ADMIN_ACCESS: off | hr | anyone). Включение: INFRASTRUCTURE.md, раздел «Тестовая админка».
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    profiles: [admin]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-8080}:8080"
+    environment:
+      ADMIN_ACCESS: ${ADMIN_ACCESS:-off}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      ADMIN_ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MONGO_URL: mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB}
+      REDIS_URL: redis://redis:6379
+      ML_URL: http://ml:8000
+      BOT_URL: http://bot:3001
+      OLLAMA_URL: http://ollama:11434
+      KAFKA_BOOTSTRAP: kafka:9092
+      S3_ENDPOINT: http://s3:9000
+      S3_ACCESS_KEY: ${S3_ROOT_USER}
+      S3_SECRET_KEY: ${S3_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks: [onboarding-net]
 
 volumes:
