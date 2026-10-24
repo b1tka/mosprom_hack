@@ -5,8 +5,9 @@
 ## Запуск
 
 ```bash
-cp .env.example .env   # поменять пароли
-docker compose up -d
+cp .env.example .env              # поменять пароли, указать BOT_TOKEN
+docker compose up -d              # всё, кроме LLM
+docker compose --profile llm up -d   # вместе с LLM (Ollama + meno-lite), нужно >= 12 ГБ RAM, см. «Ресурсы»
 docker compose ps -a
 ```
 
@@ -21,24 +22,38 @@ docker compose ps -a
 | `db/init/01_schema.sql` | схема Postgres |
 | `db/init/02_seed.sql` | роли и теги |
 | `db/migrations/` | миграции для уже созданной БД (применяются вручную) |
+| `db/mongo-init/01_app_user.js` | MongoDB: пользователь приложения (выполняется при создании тома) |
 | `bot/` | код бота (см. раздел «Бот») |
-| `ml/` | ML-сервис на FastAPI (сейчас заглушка RAG, см. `ml/README.md`) |
+| `ml/` | ML-сервис: RAG + настроение (код ML-команды), см. `ml/README.md` |
 
 ## Сервисы
 
 | Сервис | Образ | Порты (хост) | Том | Назначение |
 |--------|-------|--------------|-----|-----------|
 | `postgres` | `postgres:16` | 5432 | `pg_data` | основная БД |
+| `mongo` | `mongo:8.0.34` | 27018 (в контейнере 27017) | `mongo_data` | MongoDB; пока только инфраструктура |
 | `redis` | `redis:7-alpine` | 6380 (в контейнере 6379) | `redis_data` | состояние диалогов (`appendonly yes`) |
 | `s3` | `ghcr.io/snazy/maxio-release:latest` | 9000 (API), 9001 (консоль) | `s3_data` | файлы |
 | `s3-init` | тот же | — | — | одноразово создаёт бакет `S3_BUCKET` |
 | `kafka` | `apache/kafka:3.9.0` | 29092 | `kafka_data` | брокер для ML-модуля (KRaft, 1 нода) |
-| `kafka-init` | `apache/kafka:3.9.0` | — | — | одноразово создаёт топики |
-| `ml` | сборка из `./ml` (Python 3.12, FastAPI) | 8000 | — | ML-сервис, RAG-ручка `/rag` (заглушка) |
+| `kafka-init` | `apache/kafka:3.9.0` | — | — | одноразово создаёт топик `onboarding.answers` |
+| `ollama` | `ollama/ollama:0.40.10` | — | `ollama_data` | LLM meno-lite-0.1, OpenAI-совместимый API; **профиль `llm`** |
+| `ollama-init` | тот же | — | — | одноразово скачивает модель `MENO_MODEL`; профиль `llm` |
+| `ml` | сборка из `./ml` (Python 3.12, FastAPI, torch CPU) | 8000 | `ml_data`, `hf_cache` | ML API: RAG (`/v1/ask`) + фоновая оценка настроения |
+| `ml-mood-consumer` | тот же образ | — | — | Kafka-консьюмер `onboarding.answers` -> настроение -> Redis |
 | `bot` | сборка из `./bot` (Node 22) | — | — | бот MAX, подключён ко всем сервисам выше |
 
-Адреса внутри сети compose: `postgres:5432`, `redis:6379`, `s3:9000`, `kafka:9092`, `ml:8000`.
+Адреса внутри сети compose: `postgres:5432`, `mongo:27017`, `redis:6379`, `s3:9000`, `kafka:9092`, `ml:8000`, `ollama:11434`.
 Адрес Kafka с хоста: `localhost:29092`. Redis с хоста: `localhost:6380` (6379 на хосте может быть занят локальным Redis).
+MongoDB с хоста: `localhost:27018` (27017 на хосте занят локальным MongoDB).
+
+### MongoDB
+Пока только инфраструктура: назначение, коллекции и индексы будут описаны позже, кодом пока никто не пользуется.
+- Root-пользователь (`MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD`) — только для администрирования.
+- Пользователь приложения (`MONGO_APP_USER` / `MONGO_APP_PASSWORD`) с ролью `readWrite` только на базу `MONGO_DB` (`onboarding`);
+  создаётся `db/mongo-init/01_app_user.js` при первом старте тома `mongo_data` (повторно не выполняется, как `db/init` у Postgres).
+- Сервисам `bot`, `ml`, `ml-mood-consumer` compose передаёт `MONGO_URL=mongodb://<app_user>:<pass>@mongo:27017/onboarding`.
+- Консоль: `docker compose exec mongo mongosh -u <root> -p <pass>`.
 
 ### S3 / OpenMaxIO
 OpenMaxIO — форк веб-консоли MinIO, отдельного образа сервера нет. Образы MinIO на Quay и
@@ -48,19 +63,50 @@ Docker Hub не скачались (401 / access denied), поэтому исп�
 Бакет по умолчанию: `onboarding-files`.
 
 ### ML-сервис (`ml/`)
-Отдельный микросервис на FastAPI, разрабатывается ML-командой (ветка `ml_ai`). Сейчас в `ml/app/main.py` заглушка:
-`rag()` случайно возвращает 200 (70%) или 400 (30%). ML-команда заменяет только тело `rag(question) -> tuple[int, str]`.
+Код ML-команды из веток `ml_ai` -> `mood_find` перенесён в `ml/` (не git merge: ветка `mood_find` удаляла наши
+`docker-compose.yml`, `db/` и доки). Ветки `ml_ai`, `mood_find`, `hr_analytics` остаются на сервере как история;
+дальнейшая ML-разработка — в `ml/` от `main`. Подробно: `ml/README.md`.
+
+- **RAG**: вопрос -> поиск в Chroma (эмбеддинги `intfloat/multilingual-e5-large`, top-3 чанка) -> LLM meno-lite-0.1 (через Ollama) -> `(код, ответ)`.
+- **Настроение**: классификация mood / reason / urgent той же LLM; статистика в Redis `onboarding:stats:<users.id>`.
+  Источники: каждый вопрос из `/v1/ask` (в фоне, после ответа) и ответы на вопросы HR из Kafka `onboarding.answers`.
+- **База знаний**: исходные документы в S3 `onboarding-files/knowledge/`, векторная база Chroma и `knowledge_base.json` — в томе `ml_data`,
+  кэш моделей HuggingFace — в томе `hf_cache`. Индексация вручную: `docker compose run --rm ml python -m app.ingest build --from-s3`.
 
 Контракт:
-- `POST /rag`, тело `{"question": "<строка>"}` -> HTTP 200, тело `{"code": 200 | 400, "answer": "<строка>"}`.
-  `code: 200` — ответ найден, `code: 400` — модель не справилась.
-- Другой HTTP-статус (422 при пустом вопросе, 5xx), таймаут (30 с, `ML_TIMEOUT_MS`) или недоступность бот считает технической ошибкой.
-- `GET /health` -> `{"status": "ok"}` (healthcheck, бот стартует после healthy `ml`).
-- OpenAPI: http://localhost:8000/docs
+- `POST /v1/ask`, тело `{"user_id": "<users.id>", "question": "<строка>", "stage": null}` -> HTTP 200, тело `{"code": 200 | 400, "answer": "<строка>"}`.
+  `code: 200` — ответ из базы или вежливый отказ на нерабочий вопрос; `code: 400` — рабочий вопрос, но в базе ответа нет.
+- `503` — LLM или векторная база недоступны (в т.ч. база пуста или профиль `llm` не запущен); `422` — невалидный запрос.
+- `GET /v1/stats/{user_id}`, `GET /health`; OpenAPI: http://localhost:8000/docs
+- Бот не зависит от `ml` при старте; таймаут запроса 90 с (`ML_TIMEOUT_MS`): LLM до 60 с (`LLM_TIMEOUT`) + поиск.
+
+### Ресурсы
+| Компонент | RAM |
+|-----------|-----|
+| LLM meno-lite-0.1 `Q4_K_M` (Ollama, CPU) | ~5–6 ГБ (4.65 ГБ веса + контекст) |
+| эмбеддинги e5-large в `ml` | ~0.9 ГБ в простое (замер), до ~2.5 ГБ под нагрузкой |
+| `ml-mood-consumer` | ~0.5 ГБ |
+| Kafka, Postgres, Redis, S3, бот | ~1.5–2 ГБ |
+
+С LLM нужно **не меньше 12 ГБ RAM** для Docker (рекомендуется 16 ГБ). Легче: `MENO_MODEL=hf.co/bond005/meno-lite-0.1-gguf:IQ3_M` (3.54 ГБ).
+Без профиля `llm` стек занимает ~4–5 ГБ. На dev-ноутбуке (8 ГБ для Docker) LLM не запускается.
+Диск: образ `ml` 3.25 ГБ (torch CPU, easyocr), модель эмбеддингов 2.2 ГБ (том `hf_cache`), LLM 4.65 ГБ (том `ollama_data`).
+
+Первый старт `ml` скачивает e5-large (~2.2 ГБ); на медленной сети (~1 МБ/с) это ~40 минут, healthcheck на это время показывает
+`unhealthy` — это не ошибка. Протокол Xet у HuggingFace на такой сети зависал, поэтому в compose `HF_HUB_DISABLE_XET=1`.
+Индексация 4 PDF (`ingest build --from-s3`) на CPU заняла ~11 минут: скан на 23 страницы распознаётся OCR. Во время индексации `ml` лучше
+остановить (`docker compose stop ml`), затем `docker compose up -d ml`.
 
 ### Kafka
-Топики (3 партиции, replication factor 1): `ml.requests` (бот → ML), `ml.responses` (ML → бот).
-Имена задаются `KAFKA_TOPIC_REQUESTS` / `KAFKA_TOPIC_RESPONSES`.
+Топик `onboarding.answers` (3 партиции, RF 1, имя — `KAFKA_TOPIC_ANSWERS`): ответы сотрудников на вопросы HR
+`{uid: users.id, hr_question, answer, stage}`, ключ = `uid`. Пишет бот (`sendHrAnswer` в `bot/src/kafka.js`; опросы HR в боте
+пока не реализованы), читает `ml-mood-consumer`. Старые топики `ml.requests` / `ml.responses` больше не используются
+(в уже созданном брокере остались, на работу не влияют).
+
+### Известная проблема: формат статистики
+`mood` (ML) и ветка `hr_analytics` (отчёты HR, в `main` не влита) используют один ключ Redis `onboarding:stats:<users.id>`,
+но разный JSON: ML пишет `total_requests`, `moods`, `reasons`, `last_reason`; hr_analytics ждёт `request_count`, `mood`,
+`request_tags`, `reason`. Перед подключением отчётов форматы нужно согласовать.
 
 ## База данных
 
@@ -110,14 +156,14 @@ JS (ESM, Node >= 20), библиотека `@maxhub/max-bot-api`. Токен: `B
 
 | Файл | Что делает |
 |------|-----------|
-| `src/index.js` | `/start`, `/id`, вопросы сотрудников -> ML API, сообщения -> Kafka, запуск и остановка |
+| `src/index.js` | `/start`, `/id`, вопросы сотрудников -> ML API, запуск и остановка |
 | `src/config.js` | чтение env (дефолты для запуска с хоста) |
 | `src/db.js` | пул Postgres, `findUserByMaxId`, `listTags`, `listDirectors`, функции приглашений |
 | `src/invite.js` | `/menu`, `/cancel`; добавление сотрудника для HR (опрос, приглашение, QR); активация сотрудника по QR |
 | `src/phone.js` | нормализация телефона, проверка почты |
 | `src/state.js` | состояние диалога в Redis, ключ `dialog:<max_id>` |
-| `src/kafka.js` | `sendToMl` -> `ml.requests`, consumer `ml.responses` |
-| `src/ml.js` | `askRag(question)` — HTTP-клиент ML-сервиса |
+| `src/kafka.js` | продюсер; `sendHrAnswer` -> `onboarding.answers` (пока не вызывается) |
+| `src/ml.js` | `ask({ userId, question, stage })` — HTTP-клиент `POST /v1/ask` |
 | `src/s3.js` | `putFile` / `getFile` в бакете |
 
 Команды: `/start`, `/id` (свой `max_id`), `/menu` (интерактивное меню; пункт «Добавить нового сотрудника» только для `hr` и `hr_head`), `/cancel`.
@@ -139,13 +185,10 @@ JS (ESM, Node >= 20), библиотека `@maxhub/max-bot-api`. Токен: `B
 
 Поток: `/start` ищет пользователя по `max_id` (нет в БД — предлагает обратиться к HR), ставит шаг `idle`.
 Обычное текстовое сообщение зарегистрированного пользователя:
-1. уходит в Kafka `ml.requests` как `{maxId, text, role, tag, ts}` (ключ = `maxId`), шаг `waiting_ml` — без изменений, Kafka-часть пока не трогаем;
-2. если роль `employee` — это вопрос: бот вызывает `POST /rag` ML-сервиса.
-   `code 200` -> пользователю уходит `answer`; `code 400` -> «Не удалось найти ответ… обратитесь к HR»;
-   техническая ошибка -> «Сервис ответов временно недоступен», подробности в `docker compose logs bot` (`ml api failed`);
-3. другие роли получают подсказку «Откройте /menu».
-
-Consumer `ml.responses` остаётся: если ML-модуль запишет туда `{maxId, text}`, бот перешлёт текст пользователю.
+1. роль `employee` — это вопрос: бот вызывает `POST /v1/ask` с `user_id = users.id` и отправляет пользователю `answer`
+   (и при `code 200`, и при `code 400` — текст формирует ML); техническая ошибка или таймаут -> «Сервис ответов временно недоступен»,
+   подробности в `docker compose logs bot` (`ml api failed`). Настроение по вопросу ML считает сам, в фоне;
+2. другие роли получают подсказку «Откройте /menu».
 
 TLS: библиотека ходит на `platform-api2.max.ru`, сертификат подписан российским УЦ Минцифры
 (Russian Trusted Root CA), которого нет в стандартных хранилищах. Корневой сертификат лежит в
@@ -160,8 +203,10 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 
 `BOT_TOKEN` (токен бота из MAX, обязателен), `POSTGRES_USER/PASSWORD/DB/PORT`, `REDIS_PORT`, `S3_IMAGE`, `S3_ROOT_USER`,
 `S3_ROOT_PASSWORD`, `S3_BUCKET`, `S3_API_PORT`, `S3_CONSOLE_PORT`,
-`KAFKA_EXTERNAL_PORT`, `KAFKA_TOPIC_REQUESTS`, `KAFKA_TOPIC_RESPONSES`, `ML_PORT`.
-В контейнер бота compose передаёт `ML_API_URL=http://ml:8000`; опционально `ML_TIMEOUT_MS` (по умолчанию 30000).
+`KAFKA_EXTERNAL_PORT`, `KAFKA_TOPIC_ANSWERS`, `ML_PORT`, `MENO_MODEL` (модель для Ollama),
+`MONGO_PORT`, `MONGO_DB`, `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD`, `MONGO_APP_USER`, `MONGO_APP_PASSWORD`.
+В контейнер бота compose передаёт `ML_API_URL=http://ml:8000` и `ML_TIMEOUT_MS=90000`. Остальные настройки ML (`RAG_TOP_K`, `EMBED_MODEL`,
+`LLM_TIMEOUT`, `CHUNK_SIZE` и т.д.) — переменные окружения из `ml/app/config.py`, при необходимости добавляются в `environment` сервиса `ml`.
 
 Значения паролей в `.env.example` — заглушки, перед реальным использованием заменить.
 
@@ -169,21 +214,37 @@ TLS: библиотека ходит на `platform-api2.max.ru`, сертифи
 
 - Postgres: схема (включая `email`, `phone`, `invites`), 4 роли и 3 тега; миграции применены на живой БД, `db/init` проверен на чистой БД.
 - Redis: `PONG`; бот пишет и читает состояние диалога.
-- S3: бакет `onboarding-files` создаётся, `putFile` / `getFile` работают.
-- Kafka: топики `ml.requests`, `ml.responses` созданы; сообщение бота дошло в `ml.requests`, ответ из `ml.responses` принят consumer-ом.
-- MAX: токен валиден (`/me`: бот «Корсик», `@se14753471_bot`), контейнер `bot` работает без перезапусков, `/start`, `/id` и опрос регистрации отвечали в живом MAX (в БД были реальные пользователи, созданные через бота).
-- Поток `/menu` -> добавление сотрудника -> активация прогнан на моках контекста с реальными Postgres и Redis: права, валидация почты и телефона, QR (PNG генерируется), чужой контакт, неверный номер, повторное использование токена, двойное подтверждение, повторы и запасной вариант при сбое загрузки картинки.
+- MongoDB: healthy; пользователь приложения создан, пишет и читает в базе `onboarding`, к `admin` доступа нет (`Unauthorized`);
+  `MONGO_URL` есть в контейнерах `bot`, `ml`, `ml-mood-consumer`; порт 27018 доступен с хоста.
+- S3: бакет `onboarding-files` создаётся, `putFile` / `getFile` работают; 4 PDF базы знаний загружены в `knowledge/` через `ingest upload`.
+- MAX: токен валиден (`/me`: бот «Корсик», `@se14753471_bot`), контейнер `bot` работает без перезапусков, `/start`, `/id` и опрос регистрации отвечали в живом MAX.
+- Поток `/menu` -> добавление сотрудника -> активация прогнан на моках контекста с реальными Postgres и Redis: права, валидация почты и телефона, QR, чужой контакт, неверный номер, повторное использование токена, двойное подтверждение, повторы и запасной вариант при сбое загрузки картинки.
+- ML (без LLM):
+  - образ `onboarding-ml` собирается (3.25 ГБ); 14/14 офлайн-тестов ML-команды (`tests/test_offline.py`) проходят в контейнере;
+  - `ml` healthy, `/health` -> ok; при пустой базе `/v1/ask` -> 503 с подсказкой про ingest; без `user_id` -> 422; `/v1/stats/<id>` без данных -> 404;
+  - `ingest build --from-s3`: 146 чанков (столько же, сколько в `knowledge_base.json` ML-команды), Chroma в томе `ml_data`; поиск находит
+    нужные документы («отпуск» -> Правила внутреннего трудового распорядка, «коммерческая тайна» -> Положение о коммерческой тайне);
+  - после индексации `/v1/ask` доходит до LLM и без неё за ~8 с отдаёт 503;
+  - `ml-mood-consumer` читает `onboarding.answers`, без LLM логирует ошибку классификации, коммитит сообщение и не падает.
+- Бот: `ask()` шлёт `{user_id, question, stage}` на `/v1/ask`; на `code 200`/`400` возвращает `answer`, на 503/422/сеть — исключение
+  (пользователь получает «Сервис ответов временно недоступен»); против живого `ml` (с хоста и из контейнера бота) — 503 -> исключение;
+  бот стартует и работает без `ml`, ошибок Kafka в логах нет.
 
-- ML-сервис: `ml` healthy, `/health` отвечает; 200 запросов к `/rag` -> 142 × `code 200`, 58 × `code 400` (71%); пустой вопрос -> HTTP 422; из контейнера бота `ml:8000` доступен.
-- `askRag`: успешный ответ, неверное тело, HTTP 500, таймаут, остановленный `ml` -> исключение в каждом случае ошибки.
+## Не проверено
 
-## Не проверено в живом MAX
+С LLM (проверять на сервере с `docker compose --profile llm up -d`; на dev-ноутбуке не хватает памяти):
+- скачивание модели `ollama-init` и ответы `/v1/ask`: 200 (ответ из базы), 400 (нет в базе), 200 + отказ (нерабочий вопрос);
+- фоновая классификация вопроса и запись статистики `onboarding:stats:<users.id>`; то же через Kafka-консьюмер;
+- время ответа на CPU (таймаут бота 90 с).
 
-- вопрос от сотрудника с ролью `employee` и ответ бота (проверяет второй человек с этой ролью); ветки обработчика в `index.js` отдельно на моках не прогонялись;
-
+В живом MAX:
+- вопрос от сотрудника с ролью `employee` и ответ бота (проверяет второй человек с этой ролью);
 - формат ссылки `https://max.ru/<бот>?start=<токен>` и доставка payload (`bot_started` или `/start <токен>`);
 - кнопка «Поделиться контактом»: приходит ли `max_info.user_id` и телефон в `vcf_info`;
 - показ QR-картинки HR;
-- единичный сбой загрузки картинки (`upload.request.error`, «Network error») воспроизвести не удалось: 18 попыток подряд прошли.
+- единичный сбой загрузки картинки (`upload.request.error`, «Network error») воспроизвести не удалось.
 
-Не проверялось также: сохранность ключа Redis после рестарта контейнера `redis`, реальная ML-модель (пока заглушка).
+Также: сохранность ключа Redis после рестарта контейнера `redis`; отправка `sendHrAnswer` из бота (опросов HR пока нет).
+
+Примечание для локальной проверки: если в shell задан `http_proxy`, запросы `curl localhost:8000` уходят в прокси и получают от него 503 —
+используйте `curl --noproxy '*' ...`.

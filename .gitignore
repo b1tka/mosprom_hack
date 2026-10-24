@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 node_modules/
+
+# артефакты ML при локальном запуске (в docker они в томе ml_data)
+ml/data/
+ml/chroma_db/
+ml/knowledge_base.json
+ml/stats_store.json

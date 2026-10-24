@@ -1,39 +1,25 @@
 import { Kafka, Partitioners, logLevel } from 'kafkajs';
 import { config } from './config.js';
 
-const { brokers, requestsTopic, responsesTopic, groupId } = config.kafka;
+const { brokers, answersTopic } = config.kafka;
 const kafka = new Kafka({ clientId: 'onboarding-bot', brokers, logLevel: logLevel.WARN });
 
 const producer = kafka.producer({ createPartitioner: Partitioners.DefaultPartitioner });
-const consumer = kafka.consumer({ groupId });
 
-// Сообщение пользователя -> ML-модуль. Ключ = max_id, чтобы порядок сообщений одного пользователя сохранялся.
-export async function sendToMl({ maxId, text, role, tag }) {
+// Ответ сотрудника на вопрос HR -> ML-консьюмер настроения (ml/app/kafka_consumer.py).
+// uid = users.id; ключ = uid, чтобы сообщения одного сотрудника шли по порядку.
+// Пока не вызывается: опросы HR в боте ещё не реализованы.
+export async function sendHrAnswer({ uid, hrQuestion, answer, stage = null }) {
   await producer.send({
-    topic: requestsTopic,
-    messages: [{ key: String(maxId), value: JSON.stringify({ maxId, text, role, tag, ts: Date.now() }) }],
-  });
-}
-
-// Ответы ML-модуля: { maxId, text }
-export async function startMlConsumer(onResponse) {
-  await consumer.subscribe({ topic: responsesTopic, fromBeginning: false });
-  await consumer.run({
-    eachMessage: async ({ message }) => {
-      try {
-        await onResponse(JSON.parse(message.value.toString()));
-      } catch (err) {
-        console.error('ml response handling failed', err);
-      }
-    },
+    topic: answersTopic,
+    messages: [{ key: uid, value: JSON.stringify({ uid, hr_question: hrQuestion, answer, stage }) }],
   });
 }
 
 export async function connectKafka() {
   await producer.connect();
-  await consumer.connect();
 }
 
 export async function disconnectKafka() {
-  await Promise.allSettled([producer.disconnect(), consumer.disconnect()]);
+  await producer.disconnect().catch(() => {});
 }

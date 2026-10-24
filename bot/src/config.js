@@ -16,12 +16,11 @@ export const config = {
   },
   ml: {
     apiUrl: process.env.ML_API_URL ?? 'http://localhost:8000',
-    timeoutMs: Number(process.env.ML_TIMEOUT_MS ?? 30000),
+    // LLM отвечает до 60 с (LLM_TIMEOUT в ML) + поиск по базе
+    timeoutMs: Number(process.env.ML_TIMEOUT_MS ?? 90000),
   },
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:29092').split(','),
-    requestsTopic: process.env.KAFKA_TOPIC_REQUESTS ?? 'ml.requests',
-    responsesTopic: process.env.KAFKA_TOPIC_RESPONSES ?? 'ml.responses',
-    groupId: process.env.KAFKA_GROUP_ID ?? 'onboarding-bot',
+    answersTopic: process.env.KAFKA_TOPIC_ANSWERS ?? 'onboarding.answers',
   },
 };

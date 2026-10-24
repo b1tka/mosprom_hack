@@ -2,13 +2,14 @@ import { config } from './config.js';
 
 const { apiUrl, timeoutMs } = config.ml;
 
-// Вопрос в RAG ML-сервиса. Возвращает { code: 200 | 400, answer }.
-// Любой другой исход (HTTP-ошибка, неверное тело, сеть, таймаут) — исключение.
-export async function askRag(question) {
-  const res = await fetch(`${apiUrl}/rag`, {
+// Вопрос сотрудника в RAG ML-сервиса (POST /v1/ask). userId = users.id: по нему ML ведёт статистику настроения.
+// Возвращает { code: 200 | 400, answer }. Любой другой исход
+// (HTTP-ошибка, в т.ч. 503 «модель/база недоступна», неверное тело, сеть, таймаут) — исключение.
+export async function ask({ userId, question, stage = null }) {
+  const res = await fetch(`${apiUrl}/v1/ask`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ user_id: userId, question, stage }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`ML API HTTP ${res.status}: ${await res.text()}`);

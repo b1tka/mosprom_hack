@@ -1,2 +1,23 @@
+# torch ставится отдельно из CPU-индекса (см. Dockerfile), здесь не указан
+
+# LLM и RAG
+langchain-core==1.7.0
+langchain-openai==1.7.2
+langchain-chroma==1.1.0
+langchain-huggingface==1.2.3
+langchain-text-splitters==1.1.3
+chromadb==1.5.9
+sentence-transformers==6.2.0
+
+# Индексация (OCR нужен только для сканов)
+pymupdf==2.0
+easyocr==1.7.2
+pillow==13.0.0
+numpy==2.5.4
+boto3==1.43.118
+
+# Сервис
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
+redis==8.1.0
+kafka-python==3.0.11
