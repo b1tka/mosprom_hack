@@ -8,7 +8,13 @@ import { hrScope } from './support.js';
 // шаги, из которых /menu выводит: чат сотрудника с HR и ответ HR в тикет
 const LEAVE_ON_MENU = ['ticket_chat', 'ticket_reply'];
 
-async function showMenu(ctx, user) {
+// из кнопки заменяем сообщение с меню, из команды отправляем новое
+function show(ctx, text, kb, notification) {
+  if (!ctx.callback) return ctx.reply(text, { attachments: [kb] });
+  return ctx.answerOnCallback({ notification, message: { text, attachments: [kb] } });
+}
+
+async function showMenu(ctx, user, notification) {
   const rows = [];
   if (isHr(user)) {
     const open = await countOpenForHr(hrScope(user));
@@ -19,7 +25,7 @@ async function showMenu(ctx, user) {
     rows.push([Keyboard.button.callback('Мои обращения', 'my:list:open:0')]);
   }
   if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');
-  return ctx.reply('Меню:', { attachments: [Keyboard.inlineKeyboard(rows)] });
+  return show(ctx, 'Меню:', Keyboard.inlineKeyboard(rows), notification);
 }
 
 export function registerMenu(bot) {
@@ -36,20 +42,18 @@ export function registerMenu(bot) {
     const user = await findUserByMaxId(maxId);
     if (!user) return ctx.answerOnCallback({ notification: 'Вас нет в системе.' });
     if (LEAVE_ON_MENU.includes((await getState(maxId)).step)) await setState(maxId, { step: 'idle', data: {} });
-    await ctx.answerOnCallback({ notification: 'Меню' });
-    return showMenu(ctx, user);
+    return showMenu(ctx, user, 'Меню');
   });
 
   bot.action('menu:kbsec', async (ctx) => {
     if (!isHr(await findUserByMaxId(ctx.user.user_id))) {
       return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
     }
-    await ctx.answerOnCallback({ notification: 'База знаний' });
     const kb = Keyboard.inlineKeyboard([
       [Keyboard.button.callback('Добавить файл', 'menu:kb')],
       [Keyboard.button.callback('Удалить файл', 'menu:kbdel')],
       [Keyboard.button.callback('← Меню', 'menu:main')],
     ]);
-    return ctx.reply('База знаний:', { attachments: [kb] });
+    return show(ctx, 'База знаний:', kb, 'База знаний');
   });
 }
