@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Онбординг{% endblock %}
+{% block content %}
+<h1>Онбординг <span class="muted">(сценарий «Корсик»)</span></h1>
+<div class="card" style="overflow:auto"><table class="t">
+  <tr><th>Сотрудник</th><th>Тег</th><th>Дата выхода</th><th>Статус</th><th>Шаги</th><th>Ближайший шаг</th><th>Ждёт ответа</th><th>Ошибки</th></tr>
+  {% for i in items %}{% set o = i.ob %}
+  <tr>
+    <td><a href="/onboarding/{{ o.userId }}">{{ o.name }}</a></td><td>{{ o.tag or '—' }}</td><td>{{ o.startDate }}</td>
+    <td><span class="chip {{ 'risk-medium' if o.status == 'paused' else '' }}">{{ STATUS_TITLES.get(o.status, o.status) }}</span></td>
+    <td>{{ i.done }}/{{ i.total }}</td>
+    <td>{% if i.next %}{{ i.next.dueAt | dt }} · {{ i.next.title or i.next.id }}{% else %}—{% endif %}</td>
+    <td>{{ i.waits or '' }}</td><td>{% if i.errors %}<span class="err">{{ i.errors | length }}</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted">Сценарий ещё ни у кого не запущен.</td></tr>{% endfor %}
+</table></div>
+{% if without %}
+<div class="card"><h2>Без сценария</h2>
+<table class="t">{% for e in without %}<tr><td><a href="/onboarding/{{ e.id }}">{{ e.surname }} {{ e.name }}</a></td><td>{{ e.tag or '—' }}</td><td>{{ e.start_date or '—' }}</td></tr>{% endfor %}</table>
+<p class="muted">Откройте сотрудника и нажмите «Запустить сценарий».</p></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,71 @@
+<h1>{{ u.surname }} {{ u.name }} <span class="muted">· {{ u.tag or 'без тега' }}</span></h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+{% if not ob %}
+<section class="card">
+  <p>Сценарий онбординга не запущен. Дата выхода: <b>{{ u.start_date or 'будет посчитана: сегодня + 3 дня' }}</b>.</p>
+  <form hx-post="/onboarding/{{ u.id }}/start" hx-target="#obcard" hx-swap="innerHTML">
+    <input name="date" placeholder="Дата выхода ГГГГ-ММ-ДД (необязательно)" size="30"> <button type="submit">Запустить сценарий</button>
+  </form>
+  <p class="muted">Сразу уйдёт первый шаг («знакомство») в чат сотруднику в MAX.</p>
+</section>
+{% else %}
+<div class="cols">
+  <section class="card">
+    <table class="kv">
+      <tr><td>Статус</td><td>{{ STATUS_TITLES.get(ob.status, ob.status) }}</td></tr>
+      <tr><td>Дата выхода</td><td>{{ ob.startDate }}</td></tr>
+      <tr><td>Активирован</td><td>{{ ob.activatedAt | dt }}</td></tr>
+      <tr><td>Обращение</td><td>{{ 'на «вы»' if ob.address == 'vy' else ('на «ты»' if ob.address == 'ty' else 'не выбрано') }}</td></tr>
+      <tr><td>Шаги</td><td>{{ sum.done }}/{{ sum.total }}{% if sum.waits %} · ждёт ответа: {{ sum.waits }}{% endif %}</td></tr>
+      <tr><td>max_id / email</td><td>{{ ob.maxId }} · {{ u.email or '—' }}</td></tr>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Управление (для проверки)</h2>
+    <p>
+      <button hx-post="/onboarding/{{ u.id }}/next" hx-target="#obcard" hx-swap="innerHTML" hx-confirm="Отправить сотруднику ближайший шаг сейчас?">Выполнить следующий шаг сейчас</button>
+      {% if ob.status == 'paused' %}<button class="ghost" hx-post="/onboarding/{{ u.id }}/status" hx-vals='{"action": "resume"}' hx-target="#obcard" hx-swap="innerHTML">▶ Продолжить</button>
+      {% else %}<button class="ghost" hx-post="/onboarding/{{ u.id }}/status" hx-vals='{"action": "pause"}' hx-target="#obcard" hx-swap="innerHTML">⏸ Пауза</button>{% endif %}
+    </p>
+    <form hx-post="/onboarding/{{ u.id }}/shift" hx-target="#obcard" hx-swap="innerHTML">
+      Сдвинуть будущие шаги на <input name="days" type="number" value="1" style="width:5em"> дн. <button type="submit">Сдвинуть</button>
+      <span class="muted">(отрицательное число приближает шаги)</span>
+    </form>
+    <form hx-post="/onboarding/{{ u.id }}/startdate" hx-target="#obcard" hx-swap="innerHTML" style="margin-top:8px">
+      Дата выхода <input name="date" value="{{ ob.startDate }}" size="12"> <button type="submit">Пересчитать</button>
+    </form>
+    <form hx-post="/onboarding/{{ u.id }}/reset" hx-target="#obcard" hx-swap="innerHTML" style="margin-top:8px">
+      <input name="confirm" placeholder="{{ CONFIRM_WORD }}" autocomplete="off" size="14"> <button class="danger" type="submit">Удалить онбординг и ответы</button>
+    </form>
+  </section>
+</div>
+<section class="card" style="overflow:auto">
+  <h2>Шаги сценария</h2>
+  <table class="t"><tr><th>Время</th><th>Шаг</th><th>Состояние</th><th>Отправлен</th><th>Напоминаний</th><th>Ошибка</th></tr>
+    {% for st in ob.steps %}<tr>
+      <td class="nowrap">{{ st.dueAt | dt }}</td><td>{{ st.title or st.id }}<br><span class="muted">{{ st.id }}</span></td>
+      <td><span class="chip {{ 'risk-low' if st.state == 'sent' else ('risk-medium' if st.state in ('waiting','running') else '') }}">{{ STATE_TITLES.get(st.state, st.state) }}</span></td>
+      <td class="nowrap">{{ st.sentAt | dt if st.sentAt else '—' }}</td><td>{{ st.reminders or '' }}</td><td class="err">{{ st.lastError or '' }}</td>
+    </tr>{% endfor %}
+  </table>
+</section>
+{% if ob.waits %}
+<section class="card"><h2>Ждёт ответа сотрудника</h2>
+  <table class="t"><tr><th>Шаг</th><th>Вопрос</th><th>Тип</th><th>С</th></tr>
+    {% for w in ob.waits %}<tr><td>{{ w.stepId }}</td><td>{{ w.text[:160] }}</td><td>{{ w.kind }}{{ ' (' ~ w.purpose ~ ')' if w.purpose }}</td><td class="nowrap">{{ w.createdAt | dt }}</td></tr>{% endfor %}
+  </table></section>
+{% endif %}
+<section class="card" style="overflow:auto">
+  <h2>Ответы на вопросы и опросы</h2>
+  {% if answers %}
+  <table class="t"><tr><th>Время</th><th>Шаг / опрос</th><th>Вопрос</th><th>Ответ</th><th></th></tr>
+    {% for a in answers %}<tr>
+      <td class="nowrap">{{ a.at | dt }}</td><td>{{ a.survey or a.stepId }}</td><td>{{ a.qid }}</td>
+      <td>{{ a.label or '' }}{% if a.value is not none %} <b>{{ a.value }}</b>{% endif %}{% if a.text and a.text != a.label %}<br><span class="muted">{{ a.text }}</span>{% endif %}</td>
+      <td>{{ '⚠️' if a.negative else '' }}</td>
+    </tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Ответов пока нет.</p>{% endif %}
+</section>
+{% endif %}

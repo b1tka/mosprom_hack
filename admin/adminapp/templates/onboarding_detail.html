@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Онбординг: {{ u.name }}{% endblock %}
+{% block content %}
+<p><a href="/onboarding">← Онбординг</a> · <a href="/employees/{{ u.id }}">карточка сотрудника</a></p>
+<div id="obcard">{% include "_onboarding_card.html" %}</div>
+{% endblock %}
