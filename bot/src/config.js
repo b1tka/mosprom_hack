@@ -23,6 +23,13 @@ export const config = {
     // индексация документа: OCR сканов на CPU может идти минутами
     indexTimeoutMs: Number(process.env.ML_INDEX_TIMEOUT_MS ?? 30 * 60 * 1000),
   },
+  // тестовая админка (admin/): вход по коду из бота, действия над тикетами через внутренний HTTP бота
+  admin: {
+    access: process.env.ADMIN_ACCESS ?? 'off',   // off | hr | anyone
+    url: (process.env.ADMIN_URL ?? 'http://localhost:8080').replace(/\/$/, ''),
+    apiToken: process.env.ADMIN_API_TOKEN ?? '',
+    internalPort: Number(process.env.ADMIN_INTERNAL_PORT ?? 3001),
+  },
   kafka: {
     brokers: (process.env.KAFKA_BROKERS ?? 'localhost:29092').split(','),
     answersTopic: process.env.KAFKA_TOPIC_ANSWERS ?? 'onboarding.answers',

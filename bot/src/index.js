@@ -1,8 +1,11 @@
 import { Bot } from '@maxhub/max-bot-api';
+import { captureErrors } from './errorlog.js';
 import { config } from './config.js';
 import { pool, findUserByMaxId } from './db.js';
 import { redis, setState } from './state.js';
+import { registerAdmin } from './admin.js';
 import { registerAlerts, startAlerts, stopAlerts } from './alerts.js';
+import { startInternalApi, stopInternalApi } from './internal.js';
 import { registerInvites } from './invite.js';
 import { registerKnowledge } from './knowledge.js';
 import { registerMenu } from './menu.js';
@@ -11,6 +14,7 @@ import { ask } from './ml.js';
 import { connectKafka, disconnectKafka } from './kafka.js';
 import { connectMongo, disconnectMongo } from './mongo.js';
 
+captureErrors();
 const bot = new Bot(config.botToken);
 
 const ROLE_TITLES = {
@@ -28,6 +32,7 @@ registerKnowledge(bot);
 registerSupport(bot);
 registerMenu(bot);
 registerAlerts(bot);
+registerAdmin(bot);
 
 // Нужен HR, чтобы внести пользователя в таблицу users
 bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id}`));
@@ -77,6 +82,7 @@ async function main() {
   await pool.query('SELECT 1');
   await connectMongo();
   await connectKafka();
+  startInternalApi(bot.api);
   startAlerts(bot.api);   // не ждём: при сбое Kafka консьюмер сам повторяет подключение
   await bot.start();
   console.log('bot started');
@@ -85,6 +91,7 @@ async function main() {
 async function shutdown() {
   await bot.stop?.();
   await stopAlerts();
+  stopInternalApi();
   await disconnectKafka();
   await disconnectMongo();
   await pool.end();

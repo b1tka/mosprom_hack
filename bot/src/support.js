@@ -253,24 +253,71 @@ async function hrMessage(ctx, hr, state) {
   const text = ctx.message?.body?.text ?? '';
   const attachments = extractAttachments(ctx);
   if (!text && !attachments.length) return ctx.reply('Можно отправить текст, фото или файл.');
-  const updated = await addMessage(ticket._id, { at: new Date(), from: 'hr', authorId: hr.id, text, attachments });
-  if (!updated) {
+  const res = await relayHrMessage(ctx.api, hr.id, ticket, text, attachments);
+  if (res.status === 'closed') {
     await setState(maxId, idle);
     return ctx.reply(`Обращение №${ticket.number} закрыто, сообщение не отправлено. Переоткрыть можно из архива.`);
   }
+  if (res.status === 'delivery_failed') return ctx.reply(`Не удалось доставить сообщение сотруднику (№${ticket.number}). Попробуйте позже.`);
+  return ctx.reply(`→ №${ticket.number}, ${shortName(ticket.employee)}`);
+}
 
+// Ответ HR в тикет: общая часть для бота и админки. hrId может быть null (ответ из админки).
+// -> { status: 'sent' | 'closed' | 'delivery_failed' }
+export async function relayHrMessage(api, hrId, ticket, text, attachments = []) {
+  const updated = await addMessage(ticket._id, { at: new Date(), from: 'hr', authorId: hrId, text, attachments });
+  if (!updated) return { status: 'closed' };
   const empState = await getState(ticket.employee.maxId);
   const empInTicket = empState.step === 'ticket_chat' && empState.data.ticketId === idOf(ticket);
   const rows = [[btn('Вопрос решён', `tk:solve:${idOf(ticket)}`)]];
   if (!empInTicket) rows.unshift([btn('Ответить', `tk:chat:${idOf(ticket)}`)]);
   try {
-    await sendRelay(ctx.api, ticket.employee.maxId, `👤 HR по №${ticket.number} «${updated.title}»:\n${text}`, attachments, kb(rows));
+    await sendRelay(api, ticket.employee.maxId, `👤 HR по №${ticket.number} «${updated.title}»:\n${text}`, attachments, kb(rows));
     if (empInTicket) await markRead(ticket._id, 'employee');
   } catch (err) {
     console.error('relay to employee failed', ticket.number, err);
-    return ctx.reply(`Не удалось доставить сообщение сотруднику (№${ticket.number}). Попробуйте позже.`);
+    return { status: 'delivery_failed' };
   }
-  return ctx.reply(`→ №${ticket.number}, ${shortName(ticket.employee)}`);
+  return { status: 'sent' };
+}
+
+// Закрытие тикета со стороны HR (кнопка в боте и админка): диалог на оценку настроения, сброс шагов, уведомление сотруднику.
+// null — тикет уже закрыт или не найден.
+export async function closeTicketAsHr(api, ticket) {
+  const closed = await closeTicket(ticket._id, 'hr');
+  if (!closed) return null;
+  publishDialog(closed);
+  const id = idOf(ticket);
+  for (const maxId of [ticket.hrMaxId, ticket.employee.maxId]) {
+    const st = await getState(maxId);
+    if (['ticket_reply', 'ticket_chat'].includes(st.step) && st.data.ticketId === id) await setState(maxId, idle);
+  }
+  try {
+    await api.sendMessageToUser(
+      Number(ticket.employee.maxId),
+      `✅ HR закрыл обращение №${ticket.number} «${closed.title}». Если вопрос остался — задайте его боту, `
+        + 'под ответом будет кнопка «Связаться с HR».',
+    );
+  } catch (err) {
+    console.error('employee close notification failed', ticket.number, err);
+  }
+  return closed;
+}
+
+// Переоткрытие тикета HR-ом (кнопка в боте и админка). null — тикет уже открыт или не найден.
+export async function reopenTicketAsHr(api, ticket) {
+  const reopened = await reopenTicket(ticket._id);
+  if (!reopened) return null;
+  try {
+    await api.sendMessageToUser(
+      Number(ticket.employee.maxId),
+      `HR снова открыл обращение №${ticket.number} «${reopened.title}».`,
+      { attachments: [kb([[btn('Ответить', `tk:chat:${idOf(ticket)}`)]])] },
+    );
+  } catch (err) {
+    console.error('employee reopen notification failed', ticket.number, err);
+  }
+  return reopened;
 }
 
 // ---------- экраны HR ----------
@@ -500,21 +547,9 @@ export function registerSupport(bot) {
   hrAction(/^tk:close:([0-9a-f]{24})$/, async (ctx, hr) => {
     const ticket = await visibleTicket(ctx, hr, ctx.match[1]);
     if (!ticket) return null;
-    const closed = await closeTicket(ticket._id, 'hr');
+    const closed = await closeTicketAsHr(ctx.api, ticket);
     if (!closed) return ctx.answerOnCallback({ notification: 'Обращение уже закрыто.' });
-    publishDialog(closed);
     await setState(ctx.user.user_id, idle);
-    const empState = await getState(ticket.employee.maxId);
-    if (empState.step === 'ticket_chat' && empState.data.ticketId === idOf(ticket)) await setState(ticket.employee.maxId, idle);
-    try {
-      await ctx.api.sendMessageToUser(
-        Number(ticket.employee.maxId),
-        `✅ HR закрыл обращение №${ticket.number} «${closed.title}». Если вопрос остался — задайте его боту, `
-          + 'под ответом будет кнопка «Связаться с HR».',
-      );
-    } catch (err) {
-      console.error('employee close notification failed', ticket.number, err);
-    }
     return show(
       ctx,
       `Обращение №${ticket.number} закрыто.`,
@@ -526,17 +561,8 @@ export function registerSupport(bot) {
   hrAction(/^tk:reopen:([0-9a-f]{24})$/, async (ctx, hr) => {
     const ticket = await visibleTicket(ctx, hr, ctx.match[1]);
     if (!ticket) return null;
-    const reopened = await reopenTicket(ticket._id);
+    const reopened = await reopenTicketAsHr(ctx.api, ticket);
     if (!reopened) return ctx.answerOnCallback({ notification: 'Обращение уже открыто.' });
-    try {
-      await ctx.api.sendMessageToUser(
-        Number(ticket.employee.maxId),
-        `HR снова открыл обращение №${ticket.number} «${reopened.title}».`,
-        { attachments: [kb([[btn('Ответить', `tk:chat:${idOf(ticket)}`)]])] },
-      );
-    } catch (err) {
-      console.error('employee reopen notification failed', ticket.number, err);
-    }
     return showHrCard(ctx, hr, reopened, 'Переоткрыто');
   });
 }
