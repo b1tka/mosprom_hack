@@ -4,6 +4,7 @@ import { findEmployeeContacts, findUserByMaxId } from './db.js';
 import { isHr } from './invite.js';
 import { ticketTitle } from './ml.js';
 import { getState, redis, setState } from './state.js';
+import { show } from './ui.js';
 import {
   addMessage, closeTicket, createTicket, getTicket, listClosedForHr, listForEmployee, listOpenForHr,
   markRead, nextUnreadForHr, reopenTicket, setTitle,
@@ -176,7 +177,7 @@ async function openTicket(ctx, user, { question, answer, source }) {
     await ctx.api.sendMessageToUser(
       Number(contacts.hr.maxId),
       `🆕 Новое обращение №${ticket.number} от ${shortName(user)}:\n«${truncate(question, MAX_MESSAGE_PREVIEW)}»`,
-      { attachments: [kb([[btn('Открыть', `tk:open:${idOf(ticket)}`)]])] },
+      { attachments: [kb([[btn('Открыть', `tk:new:${idOf(ticket)}`)]])] },
     );
   } catch (err) {
     console.error('hr notification failed', ticket.number, err);
@@ -229,7 +230,7 @@ async function employeeMessage(ctx, user, state) {
         ticket.hrMaxId,
         `💬 Новое сообщение в №${ticket.number} «${updated.title}» от ${shortName(ticket.employee)}:\n${truncate(text, MAX_MESSAGE_PREVIEW)}`,
         attachments,
-        kb([[btn('Открыть', `tk:open:${idOf(ticket)}`)]]),
+        kb([[btn('Открыть', `tk:new:${idOf(ticket)}`)]]),
       );
     }
   } catch (err) {
@@ -269,7 +270,7 @@ async function hrMessage(ctx, hr, state) {
 
 // ---------- экраны HR ----------
 
-async function showHrCard(ctx, hr, ticket) {
+async function showHrCard(ctx, hr, ticket, notification, opts) {
   const maxId = ctx.user.user_id;
   await markRead(ticket._id, 'hr');
   const id = idOf(ticket);
@@ -284,7 +285,7 @@ async function showHrCard(ctx, hr, ticket) {
     await setState(maxId, idle);
     rows = [[btn('Переоткрыть', `tk:reopen:${id}`)], [btn('← Архив', 'tk:arch:0')]];
   }
-  return ctx.reply(hrCardText(ticket, hr), { attachments: [kb(rows)] });
+  return show(ctx, hrCardText(ticket, hr), kb(rows), notification, opts);
 }
 
 function pageNav(prefix, page, total) {
@@ -296,7 +297,7 @@ function pageNav(prefix, page, total) {
 
 const pagesSuffix = (page, total) => (total > PAGE_SIZE ? `, стр. ${page + 1} из ${Math.ceil(total / PAGE_SIZE)}` : '');
 
-async function showHrList(ctx, hr, page) {
+async function showHrList(ctx, hr, page, notification) {
   const { items, total } = await listOpenForHr(hrScope(hr), { skip: page * PAGE_SIZE, limit: PAGE_SIZE });
   const rows = items.map((t) => {
     const unread = t.unreadHr ? `●${t.unreadHr} ` : '';
@@ -305,21 +306,21 @@ async function showHrList(ctx, hr, page) {
   rows.push(...pageNav('tk:list', page, total));
   rows.push([btn('Архив', 'tk:arch:0'), btn('← Меню', 'menu:main')]);
   const title = total ? `Обращения (открытых: ${total}${pagesSuffix(page, total)}):` : 'Открытых обращений нет.';
-  return ctx.reply(title, { attachments: [kb(rows)] });
+  return show(ctx, title, kb(rows), notification);
 }
 
-async function showHrArchive(ctx, hr, page) {
+async function showHrArchive(ctx, hr, page, notification) {
   const { items, total } = await listClosedForHr(hrScope(hr), { skip: page * PAGE_SIZE, limit: PAGE_SIZE });
   const rows = items.map((t) => [btn(truncate(`№${t.number} · ${shortName(t.employee)} · ${t.title}`, MAX_LABEL_LEN), `tk:open:${idOf(t)}`)]);
   rows.push(...pageNav('tk:arch', page, total));
   rows.push([btn('← К обращениям', 'tk:list:0')]);
   const title = total ? `Архив обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пуст.';
-  return ctx.reply(title, { attachments: [kb(rows)] });
+  return show(ctx, title, kb(rows), notification);
 }
 
 // ---------- экраны сотрудника ----------
 
-async function showEmployeeList(ctx, user, status, page) {
+async function showEmployeeList(ctx, user, status, page, notification) {
   const { items, total } = await listForEmployee(user.id, status, { skip: page * PAGE_SIZE, limit: PAGE_SIZE });
   const rows = items.map((t) => {
     const unread = t.unreadEmployee ? '● ' : '';
@@ -332,16 +333,16 @@ async function showEmployeeList(ctx, user, status, page) {
   let title;
   if (status === 'open') title = total ? `Ваши открытые обращения (${total}${pagesSuffix(page, total)}):` : 'Открытых обращений нет.';
   else title = total ? `Архив ваших обращений (${total}${pagesSuffix(page, total)}):` : 'Архив пуст.';
-  return ctx.reply(title, { attachments: [kb(rows)] });
+  return show(ctx, title, kb(rows), notification);
 }
 
-async function showEmployeeCard(ctx, ticket) {
+async function showEmployeeCard(ctx, ticket, notification) {
   await markRead(ticket._id, 'employee');
   const id = idOf(ticket);
   const rows = ticket.status === 'open'
     ? [[btn('Написать', `tk:chat:${id}`), btn('Вопрос решён', `tk:solve:${id}`)], [btn('← Мои обращения', 'my:list:open:0')]]
     : [[btn('← Архив', 'my:list:closed:0')]];
-  return ctx.reply(employeeCardText(ticket), { attachments: [kb(rows)] });
+  return show(ctx, employeeCardText(ticket), kb(rows), notification);
 }
 
 async function enterChat(ctx, ticket) {
@@ -410,8 +411,7 @@ export function registerSupport(bot) {
 
   employeeAction('tk:exit', async (ctx) => {
     await setState(ctx.user.user_id, idle);
-    await ctx.answerOnCallback({ notification: 'Вы снова с ботом' });
-    return ctx.reply(BACK_TO_BOT);
+    return show(ctx, BACK_TO_BOT, null, 'Вы снова с ботом');
   });
 
   employeeAction(/^tk:chat:([0-9a-f]{24})$/, async (ctx, user) => {
@@ -444,15 +444,13 @@ export function registerSupport(bot) {
   });
 
   employeeAction(/^my:list:(open|closed):(\d+)$/, async (ctx, user) => {
-    await ctx.answerOnCallback({ notification: 'Обращения' });
-    return showEmployeeList(ctx, user, ctx.match[1], Number(ctx.match[2]));
+    return showEmployeeList(ctx, user, ctx.match[1], Number(ctx.match[2]), 'Обращения');
   });
 
   employeeAction(/^my:open:([0-9a-f]{24})$/, async (ctx, user) => {
     const ticket = await ownTicket(ctx, user, ctx.match[1]);
     if (!ticket) return null;
-    await ctx.answerOnCallback({ notification: `№${ticket.number}` });
-    return showEmployeeCard(ctx, ticket);
+    return showEmployeeCard(ctx, ticket, `№${ticket.number}`);
   });
 
   // кнопки HR: права и видимость тикета проверяются на каждом нажатии
@@ -472,28 +470,25 @@ export function registerSupport(bot) {
 
   hrAction(/^tk:list:(\d+)$/, async (ctx, hr) => {
     await setState(ctx.user.user_id, idle);
-    await ctx.answerOnCallback({ notification: 'Обращения' });
-    return showHrList(ctx, hr, Number(ctx.match[1]));
+    return showHrList(ctx, hr, Number(ctx.match[1]), 'Обращения');
   });
 
   hrAction(/^tk:arch:(\d+)$/, async (ctx, hr) => {
     await setState(ctx.user.user_id, idle);
-    await ctx.answerOnCallback({ notification: 'Архив' });
-    return showHrArchive(ctx, hr, Number(ctx.match[1]));
+    return showHrArchive(ctx, hr, Number(ctx.match[1]), 'Архив');
   });
 
-  hrAction(/^tk:open:([0-9a-f]{24})$/, async (ctx, hr) => {
-    const ticket = await visibleTicket(ctx, hr, ctx.match[1]);
+  // tk:open — из списка (заменяем список карточкой), tk:new — из уведомления (уведомление остаётся, карточка новым сообщением)
+  hrAction(/^tk:(open|new):([0-9a-f]{24})$/, async (ctx, hr) => {
+    const ticket = await visibleTicket(ctx, hr, ctx.match[2]);
     if (!ticket) return null;
-    await ctx.answerOnCallback({ notification: `№${ticket.number}` });
-    return showHrCard(ctx, hr, ticket);
+    return showHrCard(ctx, hr, ticket, `№${ticket.number}`, { fresh: ctx.match[1] === 'new' });
   });
 
   hrAction(/^tk:next:([0-9a-f]{24})$/, async (ctx, hr) => {
     const next = await nextUnreadForHr(hrScope(hr), ctx.match[1]);
     if (!next) return ctx.answerOnCallback({ notification: 'Больше непрочитанных нет.' });
-    await ctx.answerOnCallback({ notification: `№${next.number}` });
-    return showHrCard(ctx, hr, await getTicket(next._id));
+    return showHrCard(ctx, hr, await getTicket(next._id), `№${next.number}`);
   });
 
   hrAction(/^tk:close:([0-9a-f]{24})$/, async (ctx, hr) => {
@@ -504,7 +499,6 @@ export function registerSupport(bot) {
     await setState(ctx.user.user_id, idle);
     const empState = await getState(ticket.employee.maxId);
     if (empState.step === 'ticket_chat' && empState.data.ticketId === idOf(ticket)) await setState(ticket.employee.maxId, idle);
-    await ctx.answerOnCallback({ notification: 'Закрыто' });
     try {
       await ctx.api.sendMessageToUser(
         Number(ticket.employee.maxId),
@@ -514,9 +508,12 @@ export function registerSupport(bot) {
     } catch (err) {
       console.error('employee close notification failed', ticket.number, err);
     }
-    return ctx.reply(`Обращение №${ticket.number} закрыто.`, {
-      attachments: [kb([[btn('След. непроч. →', `tk:next:${idOf(ticket)}`)], [btn('← К обращениям', 'tk:list:0')]])],
-    });
+    return show(
+      ctx,
+      `Обращение №${ticket.number} закрыто.`,
+      kb([[btn('След. непроч. →', `tk:next:${idOf(ticket)}`)], [btn('← К обращениям', 'tk:list:0')]]),
+      'Закрыто',
+    );
   });
 
   hrAction(/^tk:reopen:([0-9a-f]{24})$/, async (ctx, hr) => {
@@ -524,7 +521,6 @@ export function registerSupport(bot) {
     if (!ticket) return null;
     const reopened = await reopenTicket(ticket._id);
     if (!reopened) return ctx.answerOnCallback({ notification: 'Обращение уже открыто.' });
-    await ctx.answerOnCallback({ notification: 'Переоткрыто' });
     try {
       await ctx.api.sendMessageToUser(
         Number(ticket.employee.maxId),
@@ -534,6 +530,6 @@ export function registerSupport(bot) {
     } catch (err) {
       console.error('employee reopen notification failed', ticket.number, err);
     }
-    return showHrCard(ctx, hr, reopened);
+    return showHrCard(ctx, hr, reopened, 'Переоткрыто');
   });
 }

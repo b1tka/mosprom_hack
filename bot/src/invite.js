@@ -7,6 +7,7 @@ import {
 } from './db.js';
 import { clearState, getState, setState } from './state.js';
 import { isEmail, normalizePhone } from './phone.js';
+import { show } from './ui.js';
 
 const MAX_NAME_LEN = 100;
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -29,18 +30,18 @@ async function getBotUsername(api) {
 
 // ---------- HR: добавление сотрудника ----------
 
-async function askTag(ctx) {
+async function askTag(ctx, notification) {
   const tags = await listTags();
   const rows = tags.map((t) => [Keyboard.button.callback(t.name, `tag:${t.id}`)]);
   rows.push([Keyboard.button.callback('Без тега', 'tag:none')]);
-  await ctx.reply('Выберите тег сотрудника:', { attachments: [Keyboard.inlineKeyboard(rows)] });
+  await show(ctx, 'Выберите тег сотрудника:', Keyboard.inlineKeyboard(rows), notification);
 }
 
-async function askDirector(ctx) {
+async function askDirector(ctx, notification) {
   const directors = await listDirectors();
   const rows = directors.map((d) => [Keyboard.button.callback(`${d.name} ${d.surname}`, `dir:${d.id}`)]);
   rows.push([Keyboard.button.callback('Без руководителя', 'dir:none')]);
-  await ctx.reply('Выберите руководителя сотрудника:', { attachments: [Keyboard.inlineKeyboard(rows)] });
+  await show(ctx, 'Выберите руководителя сотрудника:', Keyboard.inlineKeyboard(rows), notification);
 }
 
 async function askConfirm(ctx, d) {
@@ -56,7 +57,7 @@ async function askConfirm(ctx, d) {
     Keyboard.button.callback('Создать', 'add:ok'),
     Keyboard.button.callback('Отмена', 'add:cancel'),
   ]]);
-  await ctx.reply(lines.join('\n'), { attachments: [kb] });
+  await show(ctx, lines.join('\n'), kb);
 }
 
 async function issueInvite(ctx, hr, d) {
@@ -218,8 +219,7 @@ export function registerInvites(bot) {
       return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
     }
     await setState(maxId, { step: 'add_name', data: {} });
-    await ctx.answerOnCallback({ notification: 'Добавление сотрудника' });
-    await ctx.reply('Добавление нового сотрудника. Отмена: /cancel.\nИмя сотрудника?');
+    await show(ctx, 'Добавление нового сотрудника. Отмена: /cancel.\nИмя сотрудника?', null, 'Добавление сотрудника');
   });
 
   bot.command('cancel', async (ctx) => {
@@ -243,8 +243,7 @@ export function registerInvites(bot) {
     const tag = (await listTags()).find((t) => t.id === value);
     if (value !== 'none' && !tag) return ctx.answerOnCallback({ notification: 'Неизвестный тег.' });
     await setState(ctx.user.user_id, { step: 'add_director', data: { ...state.data, tagId: tag?.id ?? null, tagName: tag?.name ?? null } });
-    await ctx.answerOnCallback({ notification: tag?.name ?? 'Без тега' });
-    return askDirector(ctx);
+    return askDirector(ctx, tag?.name ?? 'Без тега');
   });
 
   hrAction(/^dir:(.+)$/, 'add_director', async (ctx, hr, state) => {
@@ -255,18 +254,16 @@ export function registerInvites(bot) {
       step: 'add_email',
       data: { ...state.data, directorId: director?.id ?? null, directorName: director ? `${director.name} ${director.surname}` : null },
     });
-    await ctx.answerOnCallback({ notification: 'Принято' });
-    return ctx.reply('Почта сотрудника?');
+    return show(ctx, 'Почта сотрудника?', null, 'Принято');
   });
 
   hrAction(/^add:(ok|cancel)$/, 'add_confirm', async (ctx, hr, state) => {
     const maxId = ctx.user.user_id;
     if (ctx.match[1] === 'cancel') {
       await setState(maxId, { step: 'idle', data: {} });
-      await ctx.answerOnCallback({ notification: 'Отменено' });
-      return ctx.reply('Отменено.');
+      return show(ctx, 'Отменено.', null, 'Отменено');
     }
-    await ctx.answerOnCallback({ notification: 'Создаю…' });
+    await show(ctx, 'Создаю приглашение…', null, 'Создаю…');
     // состояние сбрасываем до выдачи, чтобы повторное нажатие кнопки не создало второе приглашение
     await setState(maxId, { step: 'idle', data: {} });
     try {

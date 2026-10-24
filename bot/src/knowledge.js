@@ -8,6 +8,7 @@ import {
 } from './ml.js';
 import { deleteFile, putFile } from './s3.js';
 import { getState, setState } from './state.js';
+import { show } from './ui.js';
 
 // те же форматы, что понимает ML (ml/app/ingest.py SUPPORTED)
 const CONTENT_TYPES = { '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown' };
@@ -61,11 +62,12 @@ async function processUpload(api, maxId, attachment, name) {
 // ---------- удаление документа ----------
 
 const PAGE_SIZE = 10;
+const backToKb = Keyboard.inlineKeyboard([[Keyboard.button.callback('← База знаний', 'menu:kbsec')]]);
 const MAX_LABEL_LEN = 60;
 const shortLabel = (name) => (name.length > MAX_LABEL_LEN ? `${name.slice(0, MAX_LABEL_LEN - 1)}…` : name);
 
 // имена держим в состоянии, в кнопках — только индекс: длинное имя не влезет в payload кнопки
-async function showDocumentsPage(ctx, docs, page) {
+async function showDocumentsPage(ctx, docs, page, notification) {
   const start = page * PAGE_SIZE;
   const rows = docs.slice(start, start + PAGE_SIZE)
     .map((name, i) => [Keyboard.button.callback(shortLabel(name), `kbdel:${start + i}`)]);
@@ -76,7 +78,7 @@ async function showDocumentsPage(ctx, docs, page) {
   rows.push([Keyboard.button.callback('Отмена', 'kbdelok:no')]);
   const pages = Math.ceil(docs.length / PAGE_SIZE);
   const title = pages > 1 ? `Выберите файл для удаления (стр. ${page + 1} из ${pages}):` : 'Выберите файл для удаления:';
-  await ctx.reply(title, { attachments: [Keyboard.inlineKeyboard(rows)] });
+  await show(ctx, title, Keyboard.inlineKeyboard(rows), notification);
 }
 
 async function processDelete(api, maxId, name) {
@@ -120,44 +122,38 @@ export function registerKnowledge(bot) {
       docs = await listDocuments();
     } catch (err) {
       console.error('knowledge list failed', err);
-      await ctx.answerOnCallback({ notification: 'Ошибка' });
-      return ctx.reply('Не удалось получить список файлов: сервис временно недоступен. Попробуйте позже.');
+      return show(ctx, 'Не удалось получить список файлов: сервис временно недоступен. Попробуйте позже.', backToKb, 'Ошибка');
     }
-    await ctx.answerOnCallback({ notification: 'Удаление из базы знаний' });
-    if (!docs.length) return ctx.reply('База знаний пуста.');
+    if (!docs.length) return show(ctx, 'База знаний пуста.', backToKb, 'Удаление из базы знаний');
     await setState(maxId, { step: 'kb_delete_pick', data: { docs } });
-    return showDocumentsPage(ctx, docs, 0);
+    return showDocumentsPage(ctx, docs, 0, 'Удаление из базы знаний');
   });
 
   kbAction(/^kbpage:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
     const page = Number(ctx.match[1]);
     if (page * PAGE_SIZE >= state.data.docs.length) return ctx.answerOnCallback({ notification: 'Нет такой страницы.' });
-    await ctx.answerOnCallback({ notification: `Страница ${page + 1}` });
-    return showDocumentsPage(ctx, state.data.docs, page);
+    return showDocumentsPage(ctx, state.data.docs, page, `Страница ${page + 1}`);
   });
 
   kbAction(/^kbdel:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
     const name = state.data.docs[Number(ctx.match[1])];
     if (!name) return ctx.answerOnCallback({ notification: 'Неизвестный файл.' });
     await setState(maxId, { step: 'kb_delete_confirm', data: { name } });
-    await ctx.answerOnCallback({ notification: shortLabel(name) });
     const kb = Keyboard.inlineKeyboard([[
       Keyboard.button.callback('Удалить', 'kbdelok:yes'),
       Keyboard.button.callback('Отмена', 'kbdelok:no'),
     ]]);
-    return ctx.reply(`Удалить «${name}» из базы знаний? Сотрудники перестанут получать ответы по нему.`, { attachments: [kb] });
+    return show(ctx, `Удалить «${name}» из базы знаний? Сотрудники перестанут получать ответы по нему.`, kb, shortLabel(name));
   });
 
   kbAction(/^kbdelok:(yes|no)$/, ['kb_delete_pick', 'kb_delete_confirm'], async (ctx, maxId, state) => {
     // состояние сбрасываем сразу, чтобы повторное нажатие не запустило удаление ещё раз
     await setState(maxId, { step: 'idle', data: {} });
     if (ctx.match[1] === 'no' || state.step !== 'kb_delete_confirm') {
-      await ctx.answerOnCallback({ notification: 'Отменено' });
-      return ctx.reply('Отменено.');
+      return show(ctx, 'Отменено.', backToKb, 'Отменено');
     }
     const { name } = state.data;
-    await ctx.answerOnCallback({ notification: 'Удаляю…' });
-    await ctx.reply(`Удаляю «${name}». Пришлю уведомление, когда закончу.`);
+    await show(ctx, `Удаляю «${name}». Пришлю уведомление, когда закончу.`, null, 'Удаляю…');
     // в фоне: ML может ждать окончания индексации другого документа
     processDelete(ctx.api, maxId, name);
   });
@@ -168,9 +164,8 @@ export function registerKnowledge(bot) {
       return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
     }
     await setState(maxId, { step: 'kb_await_file', data: {} });
-    await ctx.answerOnCallback({ notification: 'Загрузка в базу знаний' });
-    await ctx.reply('Пришлите документ файлом (PDF, TXT или MD, до 50 МБ). '
-      + 'Документ с тем же именем будет заменён. Отмена: /cancel.');
+    await show(ctx, 'Пришлите документ файлом (PDF, TXT или MD, до 50 МБ). '
+      + 'Документ с тем же именем будет заменён. Отмена: /cancel.', null, 'Загрузка в базу знаний');
   });
 
   bot.use(async (ctx, next) => {

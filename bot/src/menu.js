@@ -2,17 +2,12 @@ import { Keyboard } from '@maxhub/max-bot-api';
 import { findUserByMaxId } from './db.js';
 import { isHr } from './invite.js';
 import { getState, setState } from './state.js';
+import { show } from './ui.js';
 import { countOpenForHr } from './tickets.js';
 import { hrScope } from './support.js';
 
 // шаги, из которых /menu выводит: чат сотрудника с HR и ответ HR в тикет
 const LEAVE_ON_MENU = ['ticket_chat', 'ticket_reply'];
-
-// из кнопки заменяем сообщение с меню, из команды отправляем новое
-function show(ctx, text, kb, notification) {
-  if (!ctx.callback) return ctx.reply(text, { attachments: [kb] });
-  return ctx.answerOnCallback({ notification, message: { text, attachments: [kb] } });
-}
 
 async function showMenu(ctx, user, notification) {
   const rows = [];
