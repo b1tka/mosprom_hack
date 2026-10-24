@@ -16,12 +16,12 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const INCOMING_PREFIX = 'incoming/';
 
 // имя файла становится именем документа в базе знаний: одноимённый документ заменяется
-const cleanFilename = (name) => path.basename(String(name ?? '').replace(/\\/g, '/'))
+export const cleanFilename = (name) => path.basename(String(name ?? '').replace(/\\/g, '/'))
   .replace(/[\u0000-\u001f]/g, '')
   .trim()
   .slice(-200);
 
-async function downloadAttachment(url) {
+export async function downloadAttachment(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
   if (!res.ok) throw new Error(`file download HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
@@ -29,14 +29,14 @@ async function downloadAttachment(url) {
 
 function failureText(name, err) {
   if (err instanceof MlError && err.status === 400) {
-    return `Не удалось добавить «${name}»: из файла не извлёкся текст. Проверьте файл и отправьте снова через /menu.`;
+    return `«${name}» добавить не получилось 😕 Из файла не извлёкся текст. Проверьте файл и отправьте снова через /menu.`;
   }
-  return `Не удалось добавить «${name}» в базу знаний: сервис временно недоступен. Попробуйте позже через /menu.`;
+  return `Не получилось добавить «${name}» в базу знаний 😕 Сервис временно недоступен, попробуйте чуть позже через /menu.`;
 }
 
 // Долгая часть (скачивание, S3, индексация в ML — до десятков минут) идёт в фоне:
 // polling библиотеки ждёт обработчики, и иначе бот замолчал бы для всех на время индексации.
-async function processUpload(api, maxId, attachment, name) {
+export async function processUpload(api, maxId, attachment, name) {
   const key = `${INCOMING_PREFIX}${crypto.randomUUID()}/${name}`;
   let text;
   try {
@@ -44,8 +44,8 @@ async function processUpload(api, maxId, attachment, name) {
     if (body.length > MAX_FILE_BYTES) throw new Error(`file too large: ${body.length}`);
     await putFile(key, body, CONTENT_TYPES[path.extname(name).toLowerCase()]);
     const result = await addDocument({ key });
-    text = `Файл «${result.source}» ${result.replaced ? 'обновлён' : 'добавлен'} в базу знаний `
-      + `(фрагментов: ${result.chunks_added}). Сотрудники уже могут задавать по нему вопросы.`;
+    text = `✅ Файл «${result.source}» ${result.replaced ? 'обновлён' : 'добавлен'} в базу знаний `
+      + `(фрагментов: ${result.chunks_added}). Теперь сотрудники могут задавать по нему вопросы!`;
   } catch (err) {
     console.error('knowledge upload failed', key, err);
     // при успехе ML сам переносит файл в knowledge/; при ошибке входящий файл не нужен
@@ -77,7 +77,7 @@ async function showDocumentsPage(ctx, docs, page, notification) {
   if (nav.length) rows.push(nav);
   rows.push([Keyboard.button.callback('Отмена', 'kbdelok:no')]);
   const pages = Math.ceil(docs.length / PAGE_SIZE);
-  const title = pages > 1 ? `Выберите файл для удаления (стр. ${page + 1} из ${pages}):` : 'Выберите файл для удаления:';
+  const title = pages > 1 ? `Какой файл удалить? 👇 (стр. ${page + 1} из ${pages})` : 'Какой файл удалить? 👇';
   await show(ctx, title, Keyboard.inlineKeyboard(rows), notification);
 }
 
@@ -85,13 +85,13 @@ async function processDelete(api, maxId, name) {
   let text;
   try {
     await deleteDocument(name);
-    text = `Файл «${name}» удалён из базы знаний.`;
+    text = `✅ Файл «${name}» удалён из базы знаний.`;
   } catch (err) {
     if (err instanceof MlError && err.status === 404) {
-      text = `Файла «${name}» уже нет в базе знаний.`;
+      text = `Файла «${name}» уже нет в базе знаний 🙂`;
     } else {
       console.error('knowledge delete failed', name, err);
-      text = `Не удалось удалить «${name}»: сервис временно недоступен. Попробуйте позже через /menu.`;
+      text = `Не получилось удалить «${name}» 😕 Сервис временно недоступен, попробуйте чуть позже через /menu.`;
     }
   }
   try {
@@ -107,7 +107,7 @@ export function registerKnowledge(bot) {
     const maxId = ctx.user.user_id;
     const state = await getState(maxId);
     if (!isHr(await findUserByMaxId(maxId)) || !steps.includes(state.step)) {
-      return ctx.answerOnCallback({ notification: 'Действие неактуально. Откройте /menu.' });
+      return ctx.answerOnCallback({ notification: 'Эта кнопка уже неактуальна 🙂 Откройте /menu.' });
     }
     return handler(ctx, maxId, state);
   });
@@ -115,45 +115,45 @@ export function registerKnowledge(bot) {
   bot.action('menu:kbdel', async (ctx) => {
     const maxId = ctx.user.user_id;
     if (!isHr(await findUserByMaxId(maxId))) {
-      return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+      return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     }
     let docs;
     try {
       docs = await listDocuments();
     } catch (err) {
       console.error('knowledge list failed', err);
-      return show(ctx, 'Не удалось получить список файлов: сервис временно недоступен. Попробуйте позже.', backToKb, 'Ошибка');
+      return show(ctx, 'Не получилось получить список файлов 😕 Сервис временно недоступен, попробуйте чуть позже.', backToKb, 'Ошибка');
     }
-    if (!docs.length) return show(ctx, 'База знаний пуста.', backToKb, 'Удаление из базы знаний');
+    if (!docs.length) return show(ctx, 'База знаний пока пуста 🙂', backToKb, 'Удаление из базы знаний');
     await setState(maxId, { step: 'kb_delete_pick', data: { docs } });
     return showDocumentsPage(ctx, docs, 0, 'Удаление из базы знаний');
   });
 
   kbAction(/^kbpage:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
     const page = Number(ctx.match[1]);
-    if (page * PAGE_SIZE >= state.data.docs.length) return ctx.answerOnCallback({ notification: 'Нет такой страницы.' });
+    if (page * PAGE_SIZE >= state.data.docs.length) return ctx.answerOnCallback({ notification: 'Такой страницы нет 🤔' });
     return showDocumentsPage(ctx, state.data.docs, page, `Страница ${page + 1}`);
   });
 
   kbAction(/^kbdel:(\d+)$/, ['kb_delete_pick'], async (ctx, maxId, state) => {
     const name = state.data.docs[Number(ctx.match[1])];
-    if (!name) return ctx.answerOnCallback({ notification: 'Неизвестный файл.' });
+    if (!name) return ctx.answerOnCallback({ notification: 'Не нашёл такой файл 🤔' });
     await setState(maxId, { step: 'kb_delete_confirm', data: { name } });
     const kb = Keyboard.inlineKeyboard([[
       Keyboard.button.callback('Удалить', 'kbdelok:yes'),
       Keyboard.button.callback('Отмена', 'kbdelok:no'),
     ]]);
-    return show(ctx, `Удалить «${name}» из базы знаний? Сотрудники перестанут получать ответы по нему.`, kb, shortLabel(name));
+    return show(ctx, `Точно удалить «${name}» из базы знаний? После этого сотрудники перестанут получать по нему ответы.`, kb, shortLabel(name));
   });
 
   kbAction(/^kbdelok:(yes|no)$/, ['kb_delete_pick', 'kb_delete_confirm'], async (ctx, maxId, state) => {
     // состояние сбрасываем сразу, чтобы повторное нажатие не запустило удаление ещё раз
     await setState(maxId, { step: 'idle', data: {} });
     if (ctx.match[1] === 'no' || state.step !== 'kb_delete_confirm') {
-      return show(ctx, 'Отменено.', backToKb, 'Отменено');
+      return show(ctx, 'Хорошо, ничего не удаляю 🙂', backToKb, 'Отменено');
     }
     const { name } = state.data;
-    await show(ctx, `Удаляю «${name}». Пришлю уведомление, когда закончу.`, null, 'Удаляю…');
+    await show(ctx, `Удаляю «${name}»… Как закончу, сразу напишу 😉`, null, 'Удаляю…');
     // в фоне: ML может ждать окончания индексации другого документа
     processDelete(ctx.api, maxId, name);
   });
@@ -161,10 +161,10 @@ export function registerKnowledge(bot) {
   bot.action('menu:kb', async (ctx) => {
     const maxId = ctx.user.user_id;
     if (!isHr(await findUserByMaxId(maxId))) {
-      return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+      return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     }
     await setState(maxId, { step: 'kb_await_file', data: {} });
-    await show(ctx, 'Пришлите документ файлом (PDF, TXT или MD, до 50 МБ). '
+    await show(ctx, 'Пришлите документ файлом (PDF, TXT или MD, до 50 МБ) 📎 '
       + 'Документ с тем же именем будет заменён. Отмена: /cancel.', null, 'Загрузка в базу знаний');
   });
 
@@ -177,19 +177,19 @@ export function registerKnowledge(bot) {
 
     if (!isHr(await findUserByMaxId(maxId))) {
       await setState(maxId, { step: 'idle', data: {} });
-      return ctx.reply('Недостаточно прав.');
+      return ctx.reply('Эта функция доступна только HR 🙂');
     }
     const attachment = ctx.message?.body?.attachments?.find((a) => a.type === 'file');
-    if (!attachment) return ctx.reply('Пришлите документ файлом (PDF, TXT или MD) или напишите /cancel.');
+    if (!attachment) return ctx.reply('Пришлите, пожалуйста, документ файлом (PDF, TXT или MD) или напишите /cancel 🙂');
 
     const name = cleanFilename(attachment.filename);
     if (!CONTENT_TYPES[path.extname(name).toLowerCase()]) {
-      return ctx.reply('Поддерживаются только PDF, TXT и MD. Пришлите другой файл или напишите /cancel.');
+      return ctx.reply('Поддерживаются только PDF, TXT и MD 🙂 Пришлите другой файл или напишите /cancel.');
     }
-    if (attachment.size > MAX_FILE_BYTES) return ctx.reply('Файл больше 50 МБ. Пришлите файл поменьше или напишите /cancel.');
+    if (attachment.size > MAX_FILE_BYTES) return ctx.reply('Файл больше 50 МБ 😕 Пришлите файл поменьше или напишите /cancel.');
 
     await setState(maxId, { step: 'idle', data: {} });
-    await ctx.reply(`Файл «${name}» принят. Добавляю в базу знаний — это может занять несколько минут, пришлю уведомление.`);
+    await ctx.reply(`Файл «${name}» получил 👍 Добавляю в базу знаний, это может занять несколько минут. Напишу, как только будет готово!`);
     processUpload(ctx.api, maxId, attachment, name);
   });
 }

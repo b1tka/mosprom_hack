@@ -14,6 +14,7 @@ async function showMenu(ctx, user, notification) {
   if (isHr(user)) {
     const open = await countOpenForHr(hrScope(user));
     rows.push([Keyboard.button.callback('Добавить нового сотрудника', 'menu:add')]);
+    rows.push([Keyboard.button.callback('Добавить сотрудника из PDF', 'menu:addpdf')]);
     rows.push([Keyboard.button.callback('База знаний', 'menu:kbsec')]);
     rows.push([Keyboard.button.callback('Мои сотрудники', 'ob:emps:0')]);
     rows.push([Keyboard.button.callback(open ? `Обращения (${open})` : 'Обращения', 'tk:list:0')]);
@@ -22,15 +23,15 @@ async function showMenu(ctx, user, notification) {
     rows.push([Keyboard.button.callback('Где пообедать', 'oa:food')]);
     rows.push([Keyboard.button.callback('Мои обращения', 'my:list:open:0')]);
   }
-  if (!rows.length) return ctx.reply('Для вашей роли в меню пока нет действий.');
-  return show(ctx, 'Меню:', Keyboard.inlineKeyboard(rows), notification);
+  if (!rows.length) return ctx.reply('Для вашей роли в меню пока ничего нет, но скоро появится 🙂');
+  return show(ctx, user.role === 'employee' ? 'Чем могу помочь? 👇' : 'Что будем делать? 👇', Keyboard.inlineKeyboard(rows), notification);
 }
 
 export function registerMenu(bot) {
   bot.command('menu', async (ctx) => {
     const maxId = ctx.user.user_id;
     const user = await findUserByMaxId(maxId);
-    if (!user) return ctx.reply('Вас нет в системе. Обратитесь к HR, чтобы вас добавили.');
+    if (!user) return ctx.reply('Я пока не нашёл вас в системе 🤔 Попросите HR добавить вас: он выдаст QR-код для регистрации.');
     if (LEAVE_ON_MENU.includes((await getState(maxId)).step)) await setState(maxId, { step: 'idle', data: {} });
     return showMenu(ctx, user);
   });
@@ -38,20 +39,20 @@ export function registerMenu(bot) {
   bot.action('menu:main', async (ctx) => {
     const maxId = ctx.user.user_id;
     const user = await findUserByMaxId(maxId);
-    if (!user) return ctx.answerOnCallback({ notification: 'Вас нет в системе.' });
+    if (!user) return ctx.answerOnCallback({ notification: 'Не нашёл вас в системе 🤔' });
     if (LEAVE_ON_MENU.includes((await getState(maxId)).step)) await setState(maxId, { step: 'idle', data: {} });
     return showMenu(ctx, user, 'Меню');
   });
 
   bot.action('menu:kbsec', async (ctx) => {
     if (!isHr(await findUserByMaxId(ctx.user.user_id))) {
-      return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+      return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     }
     const kb = Keyboard.inlineKeyboard([
       [Keyboard.button.callback('Добавить файл', 'menu:kb')],
       [Keyboard.button.callback('Удалить файл', 'menu:kbdel')],
       [Keyboard.button.callback('← Меню', 'menu:main')],
     ]);
-    return show(ctx, 'База знаний:', kb, 'База знаний');
+    return show(ctx, 'База знаний 📚 Что сделаем?', kb, 'База знаний');
   });
 }

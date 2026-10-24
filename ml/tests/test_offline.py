@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from app import alerts
+from app import users
 from app import kafka_consumer
 from app import mood
 from app import rag
@@ -233,6 +234,70 @@ class AlertTests(unittest.TestCase):
         self.assertEqual((a["type"], a["uid"], a["source"], a["ticket_number"]), ("red_flag", "u1", "ticket", 7))
         self.assertEqual(len(a["text"]), alerts.MAX_TEXT)
         self.assertEqual(a["explanation"], "Не дают отпуск.")
+
+
+class UsersFromPdfTests(unittest.TestCase):
+    TEXT = ("Анкета нового сотрудника\nФИО: Иванова Мария Сергеевна\nТелефон: +7 (999) 123-45-67\n"
+            "E-mail: m.ivanova@polyplastic.ru\nПлощадка: ГТП\nНепосредственный руководитель: Петров Алексей Николаевич")
+
+    def test_parse_tolerates_markdown_and_single_object(self):
+        self.assertEqual(users._parse('```json\n[{"name": "А"}]\n```'), [{"name": "А"}])
+        self.assertEqual(users._parse('Вот: {"name": "Б"} готово'), [{"name": "Б"}])
+        self.assertEqual(users._parse("ничего нет"), [])
+
+    def test_verify_keeps_confirmed_fields(self):
+        p = users.verify({"name": "Мария", "surname": "Иванова", "email": "m.ivanova@polyplastic.ru", "phone": "+7 999 123 45 67",
+                          "tag": "ГТП", "director": "Петров Алексей"}, self.TEXT)
+        self.assertEqual((p["email"], p["tag"], p["director"]), ("m.ivanova@polyplastic.ru", "GTP", "Петров Алексей"))
+        self.assertTrue(p["phone"])
+
+    def test_verify_drops_hallucinations(self):
+        base = {"name": "Мария", "surname": "Иванова"}
+        self.assertIsNone(users.verify({**base, "name": "Ольга", "surname": "Сидорова"}, self.TEXT))     # человека нет в тексте
+        p = users.verify({**base, "email": "fake@example.com", "phone": "+7 900 000 00 00", "tag": "Moon", "director": "Сидоров Пётр"}, self.TEXT)
+        self.assertEqual((p["email"], p["phone"], p["tag"], p["director"]), (None, None, None, None))
+
+    def test_word_forms_are_accepted(self):
+        self.assertIsNotNone(users.verify({"name": "Мария", "surname": "Иванова"}, "Принять на работу Ивановой Марии Сергеевны"))
+
+    def test_normalize_tag(self):
+        for raw, want in (("ГТП", "GTP"), ("gtp", "GTP"), ("Лужники", "Luzhniki"), ("GrPP", "GrPP"), ("Москва", None), (None, None)):
+            self.assertEqual(users.normalize_tag(raw), want, raw)
+
+    def _llm(self, *answers):
+        calls = iter(answers)
+        class Fake:
+            def invoke(self, _messages):
+                class R:
+                    content = next(calls)
+                return R()
+        return Fake()
+
+    def test_users_from_text_retries_once_on_garbage(self):
+        good = '[{"name": "Мария", "surname": "Иванова", "email": "m.ivanova@polyplastic.ru", "phone": null, "tag": "GTP", "director": null}]'
+        with mock.patch.object(users, "get_llm", return_value=self._llm("не json", good)):
+            found = users.users_from_text(self.TEXT)
+        self.assertEqual([(u["surname"], u["tag"], u["phone"]) for u in found], [("Иванова", "GTP", None)])
+
+    def test_endpoint(self):
+        from fastapi.testclient import TestClient
+        from app.api import app
+        client = TestClient(app)
+        ok = [{"name": "Мария", "surname": "Иванова", "email": None, "phone": None, "tag": None, "director": None}]
+        with mock.patch.object(users, "extract_text", return_value=self.TEXT), \
+             mock.patch.object(users, "users_from_text", return_value=ok):
+            r = client.post("/v1/users/extract", content=b"%PDF-1.4 fake", headers={"Content-Type": "application/pdf"})
+            self.assertEqual((r.status_code, r.json()["status"], r.json()["count"]), (200, "success", 1))
+            self.assertEqual(client.post("/v1/users/extract", content=b"not a pdf").status_code, 400)
+            self.assertEqual(client.post("/v1/users/extract", content=b"%PDF" + b"0" * (10 * 1024 * 1024)).status_code, 413)
+        with mock.patch.object(users, "extract_text", return_value=""):
+            self.assertEqual(client.post("/v1/users/extract", content=b"%PDF-1.4 x").status_code, 400)       # скан без текста
+        with mock.patch.object(users, "extract_text", return_value=self.TEXT), \
+             mock.patch.object(users, "users_from_text", side_effect=RuntimeError("llm down")):
+            self.assertEqual(client.post("/v1/users/extract", content=b"%PDF-1.4 x").status_code, 503)
+        with mock.patch.object(users, "extract_text", return_value=self.TEXT), mock.patch.object(users, "users_from_text", return_value=[]):
+            r = client.post("/v1/users/extract", content=b"%PDF-1.4 x")
+            self.assertEqual((r.status_code, r.json()["status"], r.json()["count"]), (200, "empty", 0))
 
 
 if __name__ == "__main__":

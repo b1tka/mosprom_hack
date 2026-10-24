@@ -37,19 +37,44 @@ async function askTag(ctx, notification) {
   const tags = await listTags();
   const rows = tags.map((t) => [Keyboard.button.callback(t.name, `tag:${t.id}`)]);
   rows.push([Keyboard.button.callback('Без тега', 'tag:none')]);
-  await show(ctx, 'Выберите тег сотрудника:', Keyboard.inlineKeyboard(rows), notification);
+  await show(ctx, 'Отлично! Выберите тег сотрудника 👇', Keyboard.inlineKeyboard(rows), notification);
 }
 
-async function askDirector(ctx, notification) {
-  const directors = await listDirectors();
+async function askDirector(ctx, notification, only = null) {
+  const directors = only ?? await listDirectors();
   const rows = directors.map((d) => [Keyboard.button.callback(`${d.name} ${d.surname}`, `dir:${d.id}`)]);
   rows.push([Keyboard.button.callback('Без руководителя', 'dir:none')]);
-  await show(ctx, 'Выберите руководителя сотрудника:', Keyboard.inlineKeyboard(rows), notification);
+  await show(ctx, 'Почти готово! Кто будет руководителем сотрудника? 👇', Keyboard.inlineKeyboard(rows), notification);
 }
+
+// Следующий шаг добавления сотрудника: известные поля (из PDF или уже введённые) пропускаются
+async function continueAdd(ctx, maxId, data, notification) {
+  if (!data.tagSet) {
+    await setState(maxId, { step: 'add_tag', data });
+    return askTag(ctx, notification);
+  }
+  if (!data.directorSet) {
+    await setState(maxId, { step: 'add_director', data });
+    return askDirector(ctx, notification, data.directorCandidates ?? null);
+  }
+  if (!data.email) {
+    await setState(maxId, { step: 'add_email', data });
+    return show(ctx, 'Какая у сотрудника рабочая почта? ✉️', null, notification);
+  }
+  if (!data.phone) {
+    await setState(maxId, { step: 'add_phone', data });
+    return show(ctx, 'Теперь номер телефона, привязанный к его аккаунту MAX (например, +7 999 123-45-67) 📱', null, notification);
+  }
+  await setState(maxId, { step: 'add_confirm', data });
+  return askConfirm(ctx, data);
+}
+
+// Для распознавания PDF: продолжить форму с данными из файла; ctx — адаптер поверх api (работает и из фона)
+export const beginAddFromData = (ctx, maxId, data) => continueAdd(ctx, maxId, data);
 
 async function askConfirm(ctx, d) {
   const lines = [
-    'Проверьте данные:',
+    'Давайте проверим всё перед созданием 👇',
     `${d.name} ${d.surname}`,
     `Тег: ${d.tagName ?? 'нет'}`,
     `Руководитель: ${d.directorName ?? 'нет'}`,
@@ -76,14 +101,14 @@ async function issueInvite(ctx, hr, d) {
     startDate,
   });
   const link = `https://max.ru/${username}?start=${token}`;
-  const text = `Приглашение для ${d.name} ${d.surname} создано. Пусть отсканирует QR-код в MAX с аккаунта, `
-    + `привязанного к номеру +${d.phone}. Действует 7 дней, срабатывает один раз.\n`
+  const text = `Готово! 🎉 Приглашение для ${d.name} ${d.surname} создано. Пусть отсканирует QR-код в MAX с аккаунта, `
+    + `привязанного к номеру +${d.phone}. Оно действует 7 дней и срабатывает один раз.\n`
     + `Дата выхода на работу: ${startDate.split('-').reverse().join('.')} (сценарий онбординга считается от неё; изменить можно в меню «Мои сотрудники»).\n\nСсылка: ${link}`;
 
   // Приглашение уже в БД: сбой загрузки картинки не должен его терять, поэтому повторяем и в крайнем случае шлём одну ссылку
   const image = await uploadQr(ctx.api, link);
   if (image) return ctx.reply(text, { attachments: [image.toJson()] });
-  await ctx.reply(`${text}\n\nКартинку с QR-кодом загрузить не удалось. Откройте ссылку или сделайте QR из неё.`);
+  await ctx.reply(`${text}\n\nQR-картинку загрузить не получилось 😕 Откройте ссылку или сделайте QR из неё.`);
 }
 
 async function uploadQr(api, link) {
@@ -103,13 +128,13 @@ async function uploadQr(api, link) {
 
 async function startActivation(ctx, token) {
   const maxId = ctx.user.user_id;
-  if (await findUserByMaxId(maxId)) return ctx.reply('Вы уже зарегистрированы. Напишите /start.');
+  if (await findUserByMaxId(maxId)) return ctx.reply('Ты уже с нами! 😊 Напиши /start.');
   const invite = await findActiveInviteByHash(hashToken(token));
-  if (!invite) return ctx.reply('Ссылка недействительна или устарела. Обратитесь к HR, чтобы получить новый QR-код.');
+  if (!invite) return ctx.reply('Эта ссылка не работает или уже устарела 😕 Попроси HR выдать новый QR-код.');
   await setState(maxId, { step: 'await_contact', data: { inviteId: invite.id, attempts: 0 } });
   const kb = Keyboard.inlineKeyboard([[Keyboard.button.requestContact('Поделиться контактом')]]);
   await ctx.reply(
-    `Здравствуйте, ${invite.name}! Чтобы подтвердить, что это вы, нажмите кнопку и поделитесь контактом.`,
+    `Привет, ${invite.name}! 👋 Чтобы убедиться, что это ты, нажми кнопку и поделись контактом.`,
     { attachments: [kb] },
   );
 }
@@ -118,12 +143,12 @@ async function handleContact(ctx, state) {
   const maxId = ctx.user.user_id;
   const attachment = ctx.message?.body?.attachments?.find((a) => a.type === 'contact');
   if (!attachment || !ctx.contactInfo) {
-    return ctx.reply('Нажмите кнопку «Поделиться контактом» под предыдущим сообщением.');
+    return ctx.reply('Нажми, пожалуйста, кнопку «Поделиться контактом» под предыдущим сообщением 👇');
   }
   const invite = await findActiveInviteById(state.data.inviteId);
   if (!invite) {
     await clearState(maxId);
-    return ctx.reply('Приглашение больше недействительно. Обратитесь к HR.');
+    return ctx.reply('Приглашение больше не действует 😕 Обратись к HR, он поможет.');
   }
 
   // контакт должен быть именно ваш (а не пересланный чужой) и совпадать с номером, который ввёл HR
@@ -133,13 +158,13 @@ async function handleContact(ctx, state) {
     const attempts = (state.data.attempts ?? 0) + 1;
     if (attempts >= MAX_CONTACT_ATTEMPTS) {
       await clearState(maxId);
-      return ctx.reply('Слишком много неудачных попыток. Обратитесь к HR.');
+      return ctx.reply('Слишком много неудачных попыток 😕 Обратись к HR, он поможет.');
     }
     await setState(maxId, { ...state, data: { ...state.data, attempts } });
     return ctx.reply(
       ownContact
-        ? 'Номер вашего аккаунта не совпадает с тем, что указал HR. Проверьте, что открыли ссылку с нужного аккаунта.'
-        : 'Нужно поделиться своим контактом, а не чужим.',
+        ? 'Номер этого аккаунта не совпадает с тем, что указал HR 🤔 Проверь, что открыл ссылку с нужного аккаунта.'
+        : 'Нужно поделиться своим контактом, а не чужим 🙂',
     );
   }
 
@@ -147,18 +172,18 @@ async function handleContact(ctx, state) {
   if (!result.ok) {
     await clearState(maxId);
     return ctx.reply(result.reason === 'already_registered'
-      ? 'Вы уже зарегистрированы. Напишите /start.'
-      : 'Приглашение больше недействительно. Обратитесь к HR.');
+      ? 'Ты уже с нами! 😊 Напиши /start.'
+      : 'Приглашение больше не действует 😕 Обратись к HR, он поможет.');
   }
   await setState(maxId, { step: 'idle', data: {} });
-  await ctx.reply(`Готово, ${result.name}! Вы зарегистрированы.`);
+  await ctx.reply(`Добро пожаловать, ${result.name}! 🎉 Регистрация завершена.`);
   try {
     await hooks.onActivated({ ctx, userId: result.userId, maxId, startDate: result.startDate });
   } catch (err) {
     console.error('onboarding start failed', err);
   }
   try {
-    await ctx.api.sendMessageToUser(Number(result.creatorMaxId), `${invite.name} ${invite.surname} активировал(а) приглашение. Дата выхода: ${(result.startDate ?? '').split('-').reverse().join('.') || 'не задана'}.`);
+    await ctx.api.sendMessageToUser(Number(result.creatorMaxId), `${invite.name} ${invite.surname} активировал(а) приглашение 🎉 Дата выхода: ${(result.startDate ?? '').split('-').reverse().join('.') || 'не задана'}.`);
   } catch (err) {
     console.error('creator notification failed', err);
   }
@@ -191,52 +216,48 @@ export function registerInvites(bot) {
     // шаги HR; права проверяем на каждом шаге
     if (!isHr(await findUserByMaxId(maxId))) {
       await clearState(maxId);
-      return ctx.reply('Недостаточно прав.');
+      return ctx.reply('Эта функция доступна только HR 🙂');
     }
     switch (state.step) {
       case 'add_name': {
         const name = cleanName(text);
-        if (!name) return ctx.reply(`Введите имя (до ${MAX_NAME_LEN} символов).`);
+        if (!name) return ctx.reply(`Хм, не получилось 🤔 Введите имя (до ${MAX_NAME_LEN} символов).`);
         await setState(maxId, { step: 'add_surname', data: { name } });
-        return ctx.reply('Фамилия сотрудника?');
+        return ctx.reply('Отлично! А фамилия? 🙂');
       }
       case 'add_surname': {
         const surname = cleanName(text);
-        if (!surname) return ctx.reply(`Введите фамилию (до ${MAX_NAME_LEN} символов).`);
-        await setState(maxId, { step: 'add_tag', data: { ...state.data, surname } });
-        return askTag(ctx);
+        if (!surname) return ctx.reply(`Хм, не получилось 🤔 Введите фамилию (до ${MAX_NAME_LEN} символов).`);
+        return continueAdd(ctx, maxId, { ...state.data, surname });
       }
       case 'add_email': {
         const email = text?.trim();
-        if (!email || !isEmail(email)) return ctx.reply('Это не похоже на почту. Пример: ivan@company.ru');
-        await setState(maxId, { step: 'add_phone', data: { ...state.data, email } });
-        return ctx.reply('Номер телефона сотрудника, привязанный к его аккаунту MAX (например, +7 999 123-45-67):');
+        if (!email || !isEmail(email)) return ctx.reply('Хм, это не похоже на почту 🤔 Пример: ivan@company.ru');
+        return continueAdd(ctx, maxId, { ...state.data, email });
       }
       case 'add_phone': {
         const phone = normalizePhone(text);
-        if (!phone) return ctx.reply('Не удалось распознать номер. Пример: +7 999 123-45-67');
-        if (await phoneTaken(phone)) return ctx.reply('Сотрудник с таким номером уже есть в системе.');
-        const data = { ...state.data, phone };
-        await setState(maxId, { step: 'add_confirm', data });
-        return askConfirm(ctx, data);
+        if (!phone) return ctx.reply('Не получилось распознать номер 🤔 Пример: +7 999 123-45-67');
+        if (await phoneTaken(phone)) return ctx.reply('Сотрудник с таким номером уже есть в системе 🙂');
+        return continueAdd(ctx, maxId, { ...state.data, phone });
       }
       default:
-        return ctx.reply('Пожалуйста, выберите вариант кнопкой выше или напишите /cancel.');
+        return ctx.reply('Выберите, пожалуйста, вариант кнопкой выше или напишите /cancel 🙂');
     }
   });
 
   bot.action('menu:add', async (ctx) => {
     const maxId = ctx.user.user_id;
     if (!isHr(await findUserByMaxId(maxId))) {
-      return ctx.answerOnCallback({ notification: 'Недостаточно прав.' });
+      return ctx.answerOnCallback({ notification: 'Эта функция доступна только HR 🙂' });
     }
     await setState(maxId, { step: 'add_name', data: {} });
-    await show(ctx, 'Добавление нового сотрудника. Отмена: /cancel.\nИмя сотрудника?', null, 'Добавление сотрудника');
+    await show(ctx, 'Давайте добавим нового сотрудника! 🎉 Отменить можно в любой момент: /cancel.\nКак его зовут?', null, 'Добавление сотрудника');
   });
 
   bot.command('cancel', async (ctx) => {
     await setState(ctx.user.user_id, { step: 'idle', data: {} });
-    await ctx.reply('Отменено.');
+    await ctx.reply('Хорошо, отменил 🙂 Если что, я рядом.');
   });
 
   // кнопки HR; проверяем и шаг, и права
@@ -245,7 +266,7 @@ export function registerInvites(bot) {
     const hr = await findUserByMaxId(maxId);
     const state = await getState(maxId);
     if (!isHr(hr) || state.step !== step) {
-      return ctx.answerOnCallback({ notification: 'Действие неактуально. Откройте /menu.' });
+      return ctx.answerOnCallback({ notification: 'Эта кнопка уже неактуальна 🙂 Откройте /menu.' });
     }
     return handler(ctx, hr, state);
   });
@@ -253,27 +274,28 @@ export function registerInvites(bot) {
   hrAction(/^tag:(.+)$/, 'add_tag', async (ctx, hr, state) => {
     const [, value] = ctx.match;
     const tag = (await listTags()).find((t) => t.id === value);
-    if (value !== 'none' && !tag) return ctx.answerOnCallback({ notification: 'Неизвестный тег.' });
-    await setState(ctx.user.user_id, { step: 'add_director', data: { ...state.data, tagId: tag?.id ?? null, tagName: tag?.name ?? null } });
-    return askDirector(ctx, tag?.name ?? 'Без тега');
+    if (value !== 'none' && !tag) return ctx.answerOnCallback({ notification: 'Не нашёл такой тег 🤔' });
+    return continueAdd(ctx, ctx.user.user_id, { ...state.data, tagId: tag?.id ?? null, tagName: tag?.name ?? null, tagSet: true }, tag?.name ?? 'Без тега');
   });
 
   hrAction(/^dir:(.+)$/, 'add_director', async (ctx, hr, state) => {
     const [, value] = ctx.match;
     const director = (await listDirectors()).find((d) => d.id === value);
-    if (value !== 'none' && !director) return ctx.answerOnCallback({ notification: 'Неизвестный руководитель.' });
-    await setState(ctx.user.user_id, {
-      step: 'add_email',
-      data: { ...state.data, directorId: director?.id ?? null, directorName: director ? `${director.name} ${director.surname}` : null },
-    });
-    return show(ctx, 'Почта сотрудника?', null, 'Принято');
+    if (value !== 'none' && !director) return ctx.answerOnCallback({ notification: 'Не нашёл такого руководителя 🤔' });
+    return continueAdd(ctx, ctx.user.user_id, {
+      ...state.data,
+      directorId: director?.id ?? null,
+      directorName: director ? `${director.name} ${director.surname}` : null,
+      directorSet: true,
+      directorCandidates: undefined,
+    }, 'Принято');
   });
 
   hrAction(/^add:(ok|cancel)$/, 'add_confirm', async (ctx, hr, state) => {
     const maxId = ctx.user.user_id;
     if (ctx.match[1] === 'cancel') {
       await setState(maxId, { step: 'idle', data: {} });
-      return show(ctx, 'Отменено.', null, 'Отменено');
+      return show(ctx, 'Хорошо, отменил 🙂 Если что, я рядом.', null, 'Отменено');
     }
     await show(ctx, 'Создаю приглашение…', null, 'Создаю…');
     // состояние сбрасываем до выдачи, чтобы повторное нажатие кнопки не создало второе приглашение
@@ -282,7 +304,7 @@ export function registerInvites(bot) {
       return await issueInvite(ctx, hr, state.data);
     } catch (err) {
       console.error('invite creation failed', err);
-      return ctx.reply('Не удалось создать приглашение. Попробуйте ещё раз через /menu.');
+      return ctx.reply('Ой, не получилось создать приглашение 😕 Попробуйте ещё раз через /menu.');
     }
   });
 }

@@ -45,6 +45,19 @@ export async function ticketTitle(text) {
   return res.json();
 }
 
+// Данные нового сотрудника из PDF (POST /v1/users/extract, тело — сам PDF): { status, count, users: [{ name, surname, email, phone, tag, director }] }.
+// 400 — не PDF или нет текста (скан без распознавания), 413 — больше 10 МБ, 503 — LLM недоступна. Долго: OCR скана + LLM.
+export async function extractUser(pdf) {
+  const res = await fetch(`${apiUrl}/v1/users/extract`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/pdf' },
+    body: pdf,
+    signal: AbortSignal.timeout(Math.max(timeoutMs, 180000)),
+  });
+  if (!res.ok) throw new MlError(res.status, await res.text());
+  return res.json();
+}
+
 // Имена документов базы знаний (и проиндексированных, и лежащих в S3).
 export async function listDocuments() {
   const res = await fetch(`${apiUrl}/v1/documents`, { signal: AbortSignal.timeout(timeoutMs) });

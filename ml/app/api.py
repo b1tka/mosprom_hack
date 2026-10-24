@@ -1,6 +1,7 @@
 """FastAPI: POST /v1/ask -> RAG-ответ + фоновое обновление статистики настроения;
 POST /v1/documents -> добавить файл из S3 в базу знаний; GET / DELETE /v1/documents — список и удаление;
-POST /v1/ticket-title -> тема и категория обращения к HR.
+POST /v1/ticket-title -> тема и категория обращения к HR;
+POST /v1/users/extract -> данные нового сотрудника из PDF (имя, фамилия, почта, телефон, тег, руководитель).
 
 Запуск:  uvicorn app.api:app --host 0.0.0.0 --port 8000
 """
@@ -9,9 +10,10 @@ import os
 import tempfile
 import threading
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from app import config
@@ -117,6 +119,44 @@ def add_document(req: DocumentRequest):
         raise HTTPException(503, "S3 or vector store unavailable")
     log.info("Документ %s добавлен: %s чанков", name, result["chunks_added"])
     return DocumentResponse(source=result["source"], chunks_added=result["chunks_added"], replaced=result["replaced"])
+
+
+class ExtractedUser(BaseModel):
+    name: str
+    surname: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    tag: Optional[str] = None        # GTP | GrPP | Luzhniki, если понятно из текста
+    director: Optional[str] = None   # ФИО руководителя как в документе
+
+
+class ExtractUsersResponse(BaseModel):
+    status: str                      # success | empty
+    count: int
+    users: List[ExtractedUser]
+
+
+MAX_USER_PDF = 10 * 1024 * 1024
+
+
+@app.post("/v1/users/extract", response_model=ExtractUsersResponse)
+async def extract_users(request: Request):
+    """Данные нового сотрудника из PDF. Тело запроса — сам PDF (Content-Type: application/pdf).
+    400 — не PDF или в нём нет текста; 413 — больше 10 МБ; 503 — LLM недоступна. Запись в БД — на стороне бота."""
+    from app import users
+    pdf = await request.body()
+    if len(pdf) > MAX_USER_PDF:
+        raise HTTPException(413, "pdf is larger than 10 MB")
+    if not pdf.startswith(b"%PDF"):
+        raise HTTPException(400, "not a PDF file")
+    try:
+        found = await run_in_threadpool(users.extract_users, pdf)
+    except ValueError:
+        raise HTTPException(400, "no text could be extracted from the pdf")
+    except Exception:
+        log.exception("Ошибка извлечения сотрудника из PDF")
+        raise HTTPException(503, "model unavailable")
+    return ExtractUsersResponse(status="success" if found else "empty", count=len(found), users=found)
 
 
 @app.get("/v1/documents")

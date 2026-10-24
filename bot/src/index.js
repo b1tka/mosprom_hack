@@ -10,6 +10,7 @@ import { registerInvites } from './invite.js';
 import { registerKnowledge } from './knowledge.js';
 import { registerMenu } from './menu.js';
 import { registerOnboarding, startScheduler, stopScheduler } from './onboarding/register.js';
+import { registerPdfUsers } from './pdfusers.js';
 import { ensureOnboardingIndexes } from './onboarding/store.js';
 import { getScenario } from './scenario/load.js';
 import { registerSupport, replyToQuestion } from './support.js';
@@ -34,21 +35,24 @@ registerInvites(bot);
 registerKnowledge(bot);
 registerSupport(bot);
 registerOnboarding(bot);
+registerPdfUsers(bot);
 registerMenu(bot);
 registerAlerts(bot);
 registerAdmin(bot);
 
 // Нужен HR, чтобы внести пользователя в таблицу users
-bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id}`));
+bot.command('id', (ctx) => ctx.reply(`Ваш max_id: ${ctx.user.user_id} 🙂 Передайте его HR, чтобы вас добавили в систему.`));
 
 bot.command('start', async (ctx) => {
   const maxId = ctx.user.user_id;
   const user = await findUserByMaxId(maxId);
   if (!user) {
-    return ctx.reply('Вас нет в системе. Обратитесь к HR: он выдаст вам QR-код для регистрации.');
+    return ctx.reply('Привет! 👋 Я Корсик, помощник по адаптации в ПОЛИПЛАСТИК. Пока не нашёл вас в списках: попросите HR выдать QR-код для регистрации, и мы познакомимся!');
   }
   await setState(maxId, { step: 'idle', data: {} });
-  await ctx.reply(`Здравствуйте, ${user.name}! Ваша роль: ${ROLE_TITLES[user.role] ?? user.role}.`);
+  await ctx.reply(user.role === 'employee'
+    ? `Привет, ${user.name}! 👋 Рад тебя видеть. Задавай любые вопросы о работе в компании, а в /menu найдёшь всё самое нужное.`
+    : `Привет, ${user.name}! 👋 Ваша роль: ${ROLE_TITLES[user.role] ?? user.role}. Загляните в /menu: там всё самое нужное.`);
 });
 
 // Любое текстовое сообщение (не команда) нового сотрудника — вопрос к RAG ML-сервиса
@@ -58,10 +62,10 @@ bot.on('message_created', async (ctx) => {
 
   const maxId = ctx.user.user_id;
   const user = await findUserByMaxId(maxId);
-  if (!user) return ctx.reply('Вас нет в системе. Обратитесь к HR, чтобы вас добавили.');
+  if (!user) return ctx.reply('Я пока не нашёл вас в системе 🤔 Попросите HR добавить вас: он выдаст QR-код для регистрации.');
 
   // Любое сообщение нового сотрудника — вопрос к RAG ML-сервиса; настроение ML считает сам, в фоне
-  if (user.role !== 'employee') return ctx.reply('Откройте /menu, чтобы выбрать действие.');
+  if (user.role !== 'employee') return ctx.reply('Загляните в /menu: там можно выбрать нужное действие 🙂');
   // LLM отвечает до минуты, а polling библиотеки ждёт все обработчики пачки — поэтому ответ готовим в фоне
   answerInBackground(ctx, user, text);
 });
