@@ -118,9 +118,10 @@ def status_partial(request: Request, s: auth.Session = Depends(auth.require_user
 
 register_nav("Обзор", "/")
 
-from adminapp.routes import db_mongo, db_other, db_pg, employees, kb, onboarding, tickets  # noqa: E402
+from adminapp.routes import db_mongo, db_other, db_pg, employees, kb, onboarding, staff, tickets  # noqa: E402
 
 app.include_router(employees.router)
+app.include_router(staff.router)
 app.include_router(tickets.router)
 app.include_router(onboarding.router)
 app.include_router(kb.router)

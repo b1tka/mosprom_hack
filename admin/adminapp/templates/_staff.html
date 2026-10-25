@@ -1,0 +1,24 @@
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<section class="card">
+  <h2>Добавить HR / руководителя</h2>
+  <form hx-post="/staff/add" hx-target="#staff" hx-swap="innerHTML">
+    <input name="surname" placeholder="Фамилия" required size="16">
+    <input name="name" placeholder="Имя" required size="14">
+    <select name="role">{% for k, v in ROLES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+    <input name="max_id" placeholder="max_id" required size="14" inputmode="numeric">
+    <input name="email" placeholder="email (необязательно)" size="24">
+    <button type="submit">Добавить</button>
+  </form>
+  <p class="muted">Свой max_id человек узнаёт, написав боту <code>/id</code>. После добавления этот аккаунт MAX сразу получает меню HR (<code>/menu</code>) — это точка входа в бота.</p>
+</section>
+<section class="card" style="overflow:auto">
+  <h2>Текущий персонал</h2>
+  <table class="t"><tr><th>ФИО</th><th>Роль</th><th>max_id</th><th>Email</th><th>Создан</th><th>Привязать другой max_id</th></tr>
+    {% for p in staff %}<tr>
+      <td><a href="/employees/{{ p.id }}">{{ p.surname }} {{ p.name }}</a></td><td>{{ p.role }}</td><td>{{ p.max_id }}</td><td>{{ p.email or '—' }}</td><td class="nowrap">{{ p.created_at | dt }}</td>
+      <td><form hx-post="/staff/{{ p.id }}/max-id" hx-target="#staff" hx-swap="innerHTML" hx-confirm="Сменить max_id? Старый аккаунт MAX потеряет доступ.">
+        <input name="max_id" value="{{ p.max_id }}" size="14" inputmode="numeric"> <button class="ghost" type="submit">Сохранить</button></form></td>
+    </tr>{% else %}<tr><td colspan="6" class="muted">Пока никого.</td></tr>{% endfor %}
+  </table>
+</section>
