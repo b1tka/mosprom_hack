@@ -42,11 +42,12 @@
 </div>
 <section class="card" style="overflow:auto">
   <h2>Шаги сценария</h2>
-  <table class="t"><tr><th>Время</th><th>Шаг</th><th>Состояние</th><th>Отправлен</th><th>Напоминаний</th><th>Ошибка</th></tr>
+  <table class="t"><tr><th>Время</th><th>Шаг</th><th>Состояние</th><th>Отправлен</th><th>Напоминаний</th><th>Ошибка</th><th></th></tr>
     {% for st in ob.steps %}<tr>
       <td class="nowrap">{{ st.dueAt | dt }}</td><td>{{ st.title or st.id }}<br><span class="muted">{{ st.id }}</span></td>
       <td><span class="chip {{ 'risk-low' if st.state == 'sent' else ('risk-medium' if st.state in ('waiting','running') else '') }}">{{ STATE_TITLES.get(st.state, st.state) }}</span></td>
       <td class="nowrap">{{ st.sentAt | dt if st.sentAt else '—' }}</td><td>{{ st.reminders or '' }}</td><td class="err">{{ st.lastError or '' }}</td>
+      <td>{% if st.state != 'running' %}<button class="ghost" hx-post="/onboarding/{{ u.id }}/step" hx-vals='{"step_id": "{{ st.id }}"}' hx-target="#obcard" hx-swap="innerHTML" hx-confirm="Отправить сотруднику шаг «{{ st.id }}» с начала сейчас? Его ответы и ожидания будут сброшены.">▶ Выполнить</button>{% endif %}</td>
     </tr>{% endfor %}
   </table>
 </section>

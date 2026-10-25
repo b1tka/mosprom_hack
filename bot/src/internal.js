@@ -40,7 +40,7 @@ function readJson(req) {
   });
 }
 
-// Действия админки над онбордингом сотрудника: запуск, следующий шаг сейчас, сдвиг времени, пауза, дата выхода
+// Действия админки над онбордингом сотрудника: запуск, следующий шаг сейчас, произвольный шаг, сдвиг времени, пауза, дата выхода
 async function onboardingAction(userId, action, body) {
   const engine = getEngine();
   const user = await findUserById(userId);
@@ -53,6 +53,7 @@ async function onboardingAction(userId, action, body) {
     const id = await engine.runNext(userId);
     return id ? { ok: true, step: id } : { ok: false, error: 'нет ожидающих шагов' };
   }
+  if (action === 'step') return engine.runStep(userId, String(body.stepId ?? ''));
   if (action === 'shift') {
     const days = Number(body.days);
     if (!Number.isInteger(days) || Math.abs(days) > 400) return { ok: false, error: 'days: целое от -400 до 400' };
@@ -80,7 +81,7 @@ export function makeHandler(api) {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/internal/health') return send(200, { ok: true });
 
-      const ob = url.pathname.match(/^\/internal\/onboarding\/([0-9a-f-]{36})\/(start|next|shift|pause|resume|startdate)$/);
+      const ob = url.pathname.match(/^\/internal\/onboarding\/([0-9a-f-]{36})\/(start|next|step|shift|pause|resume|startdate)$/);
       if (req.method === 'POST' && ob) return send(200, await onboardingAction(ob[1], ob[2], await readJson(req)));
 
       const m = url.pathname.match(/^\/internal\/tickets\/([0-9a-f]{24})\/(reply|close|reopen)$/);

@@ -97,6 +97,15 @@ def next_step(request: Request, uid: str, s: auth.Session = Depends(auth.require
     return _card(request, uid, ok, err, f"Шаг «{body.get('step')}» выполнен сейчас.")
 
 
+@router.post("/onboarding/{uid}/step", response_class=HTMLResponse)
+def run_step(request: Request, uid: str, step_id: str = Form(...), s: auth.Session = Depends(auth.require_csrf)):
+    if not UUID.match(uid):
+        raise HTTPException(404)
+    ok, err, _ = _bot(f"{uid}/step", {"stepId": step_id})
+    auth.audit(s, "onboarding.step", uid=uid, step=step_id, ok=ok)
+    return _card(request, uid, ok, err, f"Шаг «{step_id}» выполнен с начала.")
+
+
 @router.post("/onboarding/{uid}/shift", response_class=HTMLResponse)
 def shift(request: Request, uid: str, days: int = Form(...), s: auth.Session = Depends(auth.require_csrf)):
     if not UUID.match(uid):

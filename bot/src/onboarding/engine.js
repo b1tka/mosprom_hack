@@ -490,6 +490,24 @@ export function createEngine(deps) {
     return next.id;
   }
 
+  // выполнить конкретный шаг сейчас, с начала, в любом состоянии (кроме выполняющегося): сбрасывает его ответы и ожидания
+  async function runStep(userId, stepId) {
+    const ob = await findByUser(userId);
+    const st = ob?.steps.find((s) => s.id === stepId);
+    if (!st) return { ok: false, error: 'шаг не найден' };
+    if (st.state === 'running') return { ok: false, error: 'шаг выполняется' };
+    await onb().updateOne({ _id: ob._id, 'steps.id': stepId }, {
+      $set: {
+        'steps.$.state': 'pending', 'steps.$.pc': 0, 'steps.$.answers': {}, 'steps.$.reminders': 0, 'steps.$.lastError': null, 'steps.$.sentAt': null, updatedAt: now(),
+      },
+      $unset: { 'steps.$.remindAt': '' },
+      $pull: { waits: { stepId } },
+    });
+    if (ob.status === 'paused') await setStatus(userId, 'active');
+    await run(ob._id, stepId, 0);
+    return { ok: true, step: stepId };
+  }
+
   // сдвиг времени всех будущих шагов (проверка 3 месяцев за минуты): отрицательное значение — ближе
   async function shift(userId, days) {
     const ob = await findByUser(userId);
@@ -501,7 +519,7 @@ export function createEngine(deps) {
   }
 
   return {
-    start, tick, run, onCallback, onText, setStartDate, setStatus, runNext, shift,
+    start, tick, run, onCallback, onText, setStartDate, setStatus, runNext, runStep, shift,
     // для команд (/Food) и действий: выполнить произвольный блок инструкций без шага
     async sendBlock(ob, name) {
       for (const ins of scenario.blocks[name] ?? []) {
